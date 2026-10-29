@@ -15,6 +15,10 @@ for f in $(git -C "$G" ls-tree --name-only main src/); do git -C "$G" show "main
 rm -rf "$T/assets" && git -C "$G" archive main assets | tar -x -C "$T"
 printf '{"v":"%s","scripts":[%s]}\n' "$V" "$JSON" > "$T/version.json"
 
+# link preview (iMessage, WhatsApp, Slack); preview.png lives in this repo
+U="https://maumoya.github.io/boredom-blaster-v2/"
+OG="<meta name=\"description\" content=\"Free space shooter. Tap and play: bosses, power-ups and global high scores.\">\\n<meta property=\"og:type\" content=\"website\">\\n<meta property=\"og:url\" content=\"$U\">\\n<meta property=\"og:title\" content=\"Boredom Blaster\">\\n<meta property=\"og:description\" content=\"Free space shooter. Tap and play: bosses, power-ups and global high scores.\">\\n<meta property=\"og:image\" content=\"${U}preview.png?v=$V\">\\n<meta property=\"og:image:width\" content=\"1200\">\\n<meta property=\"og:image:height\" content=\"630\">\\n<meta name=\"twitter:card\" content=\"summary_large_image\">\\n<link rel=\"apple-touch-icon\" href=\"preview.png\">"
+
 LOADER='<script>
 (function () {
   var fallback = ['"$JSON"'];
@@ -33,7 +37,7 @@ LOADER='<script>
 })();
 </script>'
 git -C "$G" show main:index.html \
-  | sed 's#<title>Boredom Blaster</title>#<title>Boredom Blaster v2 (test)</title>\n<meta name="robots" content="noindex">#' \
+  | sed "s#<title>Boredom Blaster</title>#<title>Boredom Blaster v2 (test)</title>\\n<meta name=\"robots\" content=\"noindex\">\\n$OG#" \
   | grep -v '<script src="src/' \
   | LOADER="$LOADER" awk '/<\/body>/{print ENVIRON["LOADER"]} {print}' > "$T/index.html"
 
