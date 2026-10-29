@@ -15,6 +15,8 @@ JSON=$(echo "$LIST" | sed 's/.*/"&"/' | paste -sd, -)
 
 for f in $(git -C "$G" ls-tree --name-only main src/); do git -C "$G" show "main:$f" > "$T/$f"; done
 rm -rf "$T/assets" && git -C "$G" archive main assets | tar -x -C "$T"
+# the portfolio page about the game, served at <site>/portfolio/
+rm -rf "$T/portfolio" && git -C "$G" archive main portfolio | tar -x -C "$T"
 printf '{"v":"%s","scripts":[%s]}\n' "$V" "$JSON" > "$T/version.json"
 
 # link preview (iMessage, WhatsApp, Slack); the image and the icons ship with the game in assets/brand/
