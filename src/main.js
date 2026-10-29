@@ -11,11 +11,19 @@
   try { storage = globalThis.localStorage; } catch (e) { /* blocked: best score just won't persist */ }
   const store = BBInput.createStore(storage);
   const assets = BBAssets.createAssets(() => new Image());
-  const renderer = BBRender.createRenderer(ctx, assets);
-  const menu = BBInput.createMenu({ screen: "howto", leftHanded: store.loadLeftHanded() });
+  // reduced motion (the OS setting) turns off pulses, background drift and screen shake
+  const motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  const renderer = BBRender.createRenderer(ctx, assets, { reducedMotion: !!(motionQuery && motionQuery.matches) });
+  if (motionQuery && motionQuery.addEventListener) {
+    motionQuery.addEventListener("change", (e) => renderer.setReducedMotion(e.matches));
+  }
+  const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded() });
 
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
+  let scores = store.loadScores();
+  let stats = BBInput.createRunStats(); // goals and boss-wave lives for the results screen
+  let results = null;
   const keyboard = BBInput.createKeyboard();
   const touch = BBInput.createTouch(menu.leftHanded);
   const mouse = BBInput.createMouse(touch);
@@ -23,6 +31,8 @@
 
   function restart() {
     game = BB.restart();
+    stats = BBInput.createRunStats();
+    results = null;
     menu.screen = "playing";
   }
 
@@ -30,15 +40,14 @@
     if (action === "swap") {
       touch.setLeftHanded(menu.leftHanded);
       store.saveLeftHanded(menu.leftHanded);
-    } else if (action === "restart") restart();
+    } else if (action === "restart" || action === "start") restart();
   }
 
   addEventListener("keydown", (e) => {
     if (e.code === "Enter") {
-      if (game.status === "over") { restart(); return; }
       if (menu.screen !== "playing") { runMenuAction(menu.activate()); e.preventDefault(); return; }
     }
-    if (menu.screen === "pause") {
+    if (menu.screen === "pause" || menu.screen === "title") {
       if (e.code === "ArrowUp" || e.code === "KeyW") { menu.move(-1); e.preventDefault(); return; }
       if (e.code === "ArrowDown" || e.code === "KeyS") { menu.move(1); e.preventDefault(); return; }
     }
@@ -53,9 +62,9 @@
   }
   // returns true when the click was used by a menu or the game-over screen
   function handleScreenClick(x, y) {
-    if (game.status === "over") { restart(); return true; }
-    if (menu.screen === "howto") { runMenuAction(menu.activate()); return true; }
-    if (menu.screen === "pause") {
+    if (menu.screen === "results") { restart(); return true; }
+    if (menu.screen === "howto" || menu.screen === "scores") { runMenuAction(menu.activate()); return true; }
+    if (menu.screen === "pause" || menu.screen === "title") {
       const i = menu.itemAt(x, y);
       if (i >= 0) runMenuAction(menu.activate(i));
       return true;
@@ -95,7 +104,7 @@
     if (kp.pause && game.status === "playing") menu.toggle();
     if (menu.screen !== "playing") return {};
     if (kp.special || tp.special) BB.special(game);
-    if (kp.kaboom || tp.kaboom) BB.kaboom(game);
+    if ((kp.kaboom || tp.kaboom) && BB.kaboom(game)) stats.kaboomUsed();
     return input;
   }
 
@@ -107,8 +116,14 @@
     game.paused = menu.screen !== "playing";
     BB.update(game, dt, input);
     if (!game.paused) renderer.update(dt, game);
+    if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);
-    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000 });
+    if (game.status === "over" && menu.screen === "playing") { // the run just ended: results replace game over
+      results = stats.result(game);
+      scores = store.addScore(game.score, game.wave);
+      menu.finish();
+    }
+    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results });
     requestAnimationFrame(frame);
   }
   function start() {

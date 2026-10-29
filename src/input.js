@@ -165,7 +165,7 @@
   }
 
   // Best score and settings in localStorage-like storage; a missing or broken store never throws.
-  const BEST_KEY = "bb.best", LEFT_KEY = "bb.leftHanded";
+  const BEST_KEY = "bb.best", LEFT_KEY = "bb.leftHanded", SCORES_KEY = "bb.scores", MAX_SCORES = 5;
   function createStore(storage) {
     const read = (k) => { try { return storage ? storage.getItem(k) : null; } catch (e) { return null; } };
     const write = (k, v) => { try { if (storage) storage.setItem(k, String(v)); } catch (e) { /* storage full or blocked */ } };
@@ -181,38 +181,73 @@
       },
       loadLeftHanded: () => read(LEFT_KEY) === "1",
       saveLeftHanded(on) { write(LEFT_KEY, on ? "1" : "0"); },
+      loadScores() { // [{ score, wave }], best first, at most MAX_SCORES
+        let list;
+        try { list = JSON.parse(read(SCORES_KEY)); } catch (e) { return []; }
+        if (!Array.isArray(list)) return [];
+        return list
+          .filter((s) => s && Number.isFinite(s.score) && s.score > 0)
+          .map((s) => ({ score: Math.floor(s.score), wave: Math.max(1, Math.floor(s.wave) || 1) }))
+          .sort((a, b) => b.score - a.score).slice(0, MAX_SCORES);
+      },
+      addScore(score, wave) { // returns the table now stored
+        const list = this.loadScores();
+        if (!Number.isFinite(score) || score <= 0) return list;
+        const next = [...list, { score: Math.floor(score), wave }].sort((a, b) => b.score - a.score).slice(0, MAX_SCORES);
+        write(SCORES_KEY, JSON.stringify(next));
+        return this.loadScores();
+      },
     };
   }
 
-  // Screens: "howto" (shown at start), "playing", "pause". Pause items are picked by key or click.
+  // Screens: "title", "scores", "howto", "playing", "pause", "results". Title and pause items are
+  // picked by key or click; "howto" and "scores" go back to where they were opened from.
   const MENU_LAYOUT = { x: 140, y: 270, w: 200, h: 38, gap: 12 };
+  const TITLE_LAYOUT = { x: 140, y: 330, w: 200, h: 42, gap: 14 };
   const MENU_ACTIONS = ["resume", "howto", "swap", "restart"];
+  const TITLE_ACTIONS = ["start", "scores", "howto"];
+  const TITLE_ITEMS = ["START", "HIGH SCORES", "HOW TO PLAY"];
   function createMenu(opts) {
     opts = opts || {};
     const m = { screen: opts.screen || "howto", cursor: 0, leftHanded: !!opts.leftHanded, after: "playing" };
     m.items = () => ["Resume", "How to play", "Left-hand: " + (m.leftHanded ? "ON" : "OFF"), "Restart"];
-    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; };
-    m.toggle = () => { // P / Esc: pause, resume, or dismiss how-to-play
+    m.titleItems = () => TITLE_ITEMS.slice();
+    const listFor = () => (m.screen === "title" ? TITLE_ACTIONS : m.screen === "pause" ? MENU_ACTIONS : null);
+    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; };
+    m.toggle = () => { // P / Esc: pause, resume, or dismiss how-to-play / high scores
       if (m.screen === "playing") { m.screen = "pause"; m.cursor = 0; }
       else if (m.screen === "pause") m.screen = "playing";
-      else leaveHowTo();
+      else if (m.screen === "howto" || m.screen === "scores") leaveHowTo();
       return m.screen;
     };
+    m.finish = () => { m.screen = "results"; m.cursor = 0; }; // the run is over
+    m.toTitle = () => { m.screen = "title"; m.cursor = 0; m.after = "playing"; };
     m.move = (d) => {
-      if (m.screen === "pause") m.cursor = (m.cursor + d + MENU_ACTIONS.length) % MENU_ACTIONS.length;
+      const list = listFor();
+      if (list) m.cursor = (m.cursor + d + list.length) % list.length;
     };
     m.itemAt = (x, y) => {
-      if (m.screen !== "pause") return -1;
-      const L = MENU_LAYOUT;
-      for (let i = 0; i < MENU_ACTIONS.length; i++) {
+      const list = listFor();
+      if (!list) return -1;
+      const L = m.screen === "title" ? TITLE_LAYOUT : MENU_LAYOUT;
+      for (let i = 0; i < list.length; i++) {
         const top = L.y + i * (L.h + L.gap);
         if (x >= L.x && x <= L.x + L.w && y >= top && y <= top + L.h) return i;
       }
       return -1;
     };
-    // returns "resume" | "howto" | "swap" | "restart" | null
+    // returns "start" | "scores" | "resume" | "howto" | "swap" | "restart" | null
     m.activate = (index) => {
       if (m.screen === "howto") { leaveHowTo(); return "resume"; }
+      if (m.screen === "scores") { leaveHowTo(); return "back"; }
+      if (m.screen === "results") return "restart"; // Enter = replay; the caller starts the new run
+      if (m.screen === "title") {
+        const action = TITLE_ACTIONS[index === undefined ? m.cursor : index];
+        if (!action) return null;
+        if (action === "start") m.screen = "playing";
+        else { m.after = "title"; m.screen = action; }
+        return action;
+      }
       if (m.screen !== "pause") return null;
       const i = index === undefined ? m.cursor : index;
       const action = MENU_ACTIONS[i];
@@ -226,7 +261,47 @@
     return m;
   }
 
+  // ---- run results: stars and the goals checklist ----
+  // 1 star at wave 5, 2 at wave 10, 3 at wave 15, and the third needs a clean boss wave (no life lost on one).
+  const STAR_WAVES = [5, 10, 15];
+  function starsFor(wave, bossLifeLost) {
+    let n = STAR_WAVES.filter((w) => wave >= w).length;
+    if (n === 3 && bossLifeLost) n = 2;
+    return n;
+  }
+
+  // Watches one run: call observe(game) every frame and kaboomUsed() when a Kaboom fires.
+  function createRunStats() {
+    const s = { miniBossBeaten: false, kaboom: false, weaponMax: false, bossLifeLost: false };
+    let prev = null;
+    return {
+      state: s,
+      kaboomUsed() { s.kaboom = true; },
+      observe(game) {
+        const E = root.BBEnemies, maxLevel = root.BBRewards.WEAPON.maxLevel;
+        if (game.weaponLevel >= maxLevel) s.weaponMax = true;
+        if (prev) {
+          const alive = new Set(game.drones);
+          if (prev.drones.some((d) => d.boss && !alive.has(d))) s.miniBossBeaten = true;
+          if (game.lives < prev.lives && E.waveScript(prev.wave).boss) s.bossLifeLost = true;
+        }
+        prev = { drones: game.drones.slice(), lives: game.lives, wave: game.wave };
+      },
+      result(game) {
+        return {
+          score: game.score, wave: game.wave, stars: starsFor(game.wave, s.bossLifeLost),
+          goals: [
+            { id: "miniboss", label: "Beat a mini-boss", done: s.miniBossBeaten },
+            { id: "kaboom", label: "Use Kaboom", done: s.kaboom },
+            { id: "weapon", label: "Weapon at MAX", done: s.weaponMax },
+          ],
+        };
+      },
+    };
+  }
+
   root.BBInput = {
+    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, TITLE_ACTIONS, MAX_SCORES,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
     createStore, createMenu, buttonAt, buttonsFor, mirrorButtons,
   };

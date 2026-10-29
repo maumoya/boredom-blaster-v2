@@ -29,18 +29,24 @@
     { sprite: "meteorBig2", size: 48, speed: 22 }, { sprite: "meteorSmall", size: 22, speed: 48 },
     { sprite: "meteorTiny", size: 14, speed: 60 },
   ];
-  const HOW_TO = [
-    "Steer: drag on the left half,",
-    "or arrows / WASD",
-    "Fire: hold Space or the FIRE button",
-    "Special (X): piercing shot",
-    "Kaboom (B): blasts nearby enemies",
-    "Catch capsules: weapon, shield,",
-    "escort, Super Star",
-    "Pause: P or Esc",
+  const HOW_TO_ROWS = [
+    { icon: "heart", text: "Steer: drag left half / arrows / WASD" },
+    { icon: "fire", text: "Fire: hold Space or the FIRE button" },
+    { icon: "spec", text: "Special (X): piercing shot" },
+    { icon: "boom", text: "Kaboom (B): blasts nearby enemies" },
+    { icon: "weapon", text: "Capsules: weapon level up" },
+    { icon: "shield", text: "Silver: shield, gold: escort" },
+    { icon: "pause", text: "Pause: P or Esc" },
   ];
+  const HOW_TO = HOW_TO_ROWS.map((r) => r.text);
+  const SHAKE = { time: 0.3, mag: 6 }; // screen shake after a lost life
+  const PULSE = { depth: 0.06, speed: 4 }; // gentle breathing of the title and the replay prompt
+  const GOAL_ICON = { miniboss: "escort", kaboom: "boom", weapon: "weapon" };
 
-  function createRenderer(ctx, assets) {
+  // opts.reducedMotion: no pulses, no background drift, no screen shake
+  function createRenderer(ctx, assets, opts) {
+    let reducedMotion = !!(opts && opts.reducedMotion);
+    const shake = { time: 0 };
     const particles = [];
     const rings = []; // explosion shockwaves
     const ui = root.BBUI.createUI(ctx);
@@ -105,14 +111,18 @@
 
     // Reads the game each frame: vanished enemies explode, a lost life flashes the screen.
     function update(dt, game) {
-      scroll += dt;
+      if (!reducedMotion) scroll += dt; // drift
       const alive = new Set(game.drones);
       for (const d of prev.drones) {
         if (!alive.has(d)) explode(d.x + d.w / 2, d.y + d.h / 2, !!d.boss);
       }
-      if (prev.lives !== null && game.lives < prev.lives) flash.time = FLASH_TIME;
+      if (prev.lives !== null && game.lives < prev.lives) {
+        flash.time = FLASH_TIME;
+        if (!reducedMotion) shake.time = SHAKE.time;
+      }
       prev = { drones: game.drones.slice(), lives: game.lives, wave: game.wave };
       flash.time = Math.max(0, flash.time - dt);
+      shake.time = Math.max(0, shake.time - dt);
       for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
       for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
       for (const r of rings) r.life -= dt;
@@ -349,37 +359,98 @@
       ctx.fillRect(0, 0, W, H);
     }
 
+    // 1 when motion is reduced, otherwise a slow breathing scale around 1
+    const pulse = (t) => (reducedMotion ? 1 : 1 + PULSE.depth * Math.sin(t * PULSE.speed));
+    function pulsed(cx, cy, t, drawFn) {
+      const k = pulse(t);
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(k, k); ctx.translate(-cx, -cy);
+      drawFn();
+      ctx.restore();
+    }
+
+    // glossy menu button with a real icon on its left; the highlighted one is gold
+    function menuButton(L, i, label, icon, hot) {
+      const y = L.y + i * (L.h + L.gap);
+      ui.button(L.x, y, L.w, L.h, label, hot ? "hot" : "idle");
+      ui.icon(icon, L.x + 22, y + L.h / 2, 20, hot ? "#1a1000" : "#fff");
+    }
+
     function drawPause(menu) {
       dim(0.65);
       ui.title("PAUSED", W / 2, 230, 36);
-      const L = root.BBInput.MENU_LAYOUT;
-      menu.items().forEach((label, i) => {
-        const y = L.y + i * (L.h + L.gap);
-        ui.button(L.x, y, L.w, L.h, label, i === menu.cursor ? "hot" : "idle");
+      const L = root.BBInput.MENU_LAYOUT, icons = ["play", "weapon", "escort", "boom"];
+      menu.items().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
+    }
+
+    function drawTitle(view) {
+      const menu = view.menu, t = view.time || 0, L = root.BBInput.TITLE_LAYOUT;
+      dim(0.45);
+      pulsed(W / 2, 150, t, () => {
+        ui.title("BOREDOM", W / 2, 150, 54);
+        ui.title("BLASTER", W / 2, 215, 54, "#fd4");
       });
+      sprite("ship", W / 2, 268, 60, null);
+      const icons = ["play", "star", "weapon"];
+      menu.titleItems().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
+      text("BEST " + (view.best || 0), W / 2, 500, 16, "#fd4", "center");
+    }
+
+    function drawScores(view) {
+      const list = view.scores || [];
+      dim(0.82);
+      ui.panel(40, 90, W - 80, 440, { stroke: "#fd4" });
+      ui.title("HIGH SCORES", W / 2, 150, 28, "#fd4");
+      if (!list.length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
+      list.forEach((s, i) => {
+        const y = 210 + i * 46;
+        text(String(i + 1) + ".", 90, y, 20, "#9ab");
+        text(String(s.score).padStart(6, "0"), 130, y, 20, i === 0 ? "#fd4" : "#fff");
+        text("WAVE " + s.wave, 390, y, 15, "#9ab", "right");
+      });
+      text("Press Enter, P or tap to go back", W / 2, 500, 14, "#fd4", "center");
     }
 
     function drawHowTo() {
       dim(0.82);
       ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
       ui.title("HOW TO PLAY", W / 2, 140, 28);
-      HOW_TO.forEach((line, i) => text(line, W / 2, 190 + i * 32, 15, "#fff", "center"));
+      HOW_TO_ROWS.forEach((row, i) => {
+        const y = 195 + i * 40;
+        ui.icon(row.icon, 76, y - 5, 24, "#4df");
+        text(row.text, 98, y, 14, "#fff");
+      });
       text("Press Enter, P or tap to continue", W / 2, 500, 14, "#fd4", "center");
     }
 
-    function drawGameOver(view) {
-      const game = view.game;
-      dim(0.5);
-      ui.title("GAME OVER", W / 2, H / 2 - 10, 40, "#f55");
-      ui.stars(W / 2, H / 2 - 60, Math.min(3, Math.floor(game.wave / 3)), 3, 9);
-      text("Score " + game.score, W / 2, H / 2 + 26, 20, "#fff", "center");
-      text("Best " + (view.best || 0), W / 2, H / 2 + 52, 16, "#fd4", "center");
-      text("Press Enter to restart", W / 2, H / 2 + 84, 18, "#4df", "center");
+    // results replace the old game over: score, wave, stars and the goals checklist
+    function drawResults(view) {
+      const game = view.game, t = view.time || 0;
+      const res = view.results || { score: game.score, wave: game.wave, stars: 0, goals: [] };
+      dim(0.7);
+      ui.panel(50, 100, W - 100, 420, { stroke: "#f55" });
+      ui.title("RESULTS", W / 2, 160, 36, "#f55");
+      ui.stars(W / 2, 205, res.stars, 3, 16);
+      text("SCORE " + res.score, W / 2, 265, 24, "#fff", "center");
+      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 295, 15, "#fd4", "center");
+      text("GOALS", W / 2, 335, 13, "#9ab", "center");
+      res.goals.forEach((g, i) => {
+        const y = 365 + i * 32;
+        ui.icon(GOAL_ICON[g.id] || "star", 100, y - 5, 22, g.done ? "#ffd23c" : "rgba(255,255,255,0.3)");
+        text(g.label, 124, y, 15, g.done ? "#fff" : "#789");
+        text(g.done ? "DONE" : "-", 380, y, 14, g.done ? "#6e6" : "#789", "right");
+      });
+      pulsed(W / 2, 485, t, () => text("Press Enter to replay", W / 2, 485, 18, "#4df", "center"));
     }
 
-    // view: { game, menu, best, touch, touchSeen, time }
+    // view: { game, menu, best, touch, touchSeen, time, scores, results }
     function draw(view) {
       const game = view.game, t = view.time || 0;
+      ctx.save();
+      if (shake.time > 0) { // wobble that fades out
+        const k = shake.time / SHAKE.time;
+        ctx.translate(Math.sin(shake.time * 90) * SHAKE.mag * k, Math.cos(shake.time * 70) * SHAKE.mag * k);
+      }
       drawBackground();
       for (const d of game.drones) drawEnemy(d);
       for (const c of game.capsules) drawCapsule(c, t);
@@ -393,15 +464,23 @@
         ctx.fillStyle = "rgba(255,60,60," + (0.4 * flash.time / FLASH_TIME) + ")";
         ctx.fillRect(0, 0, W, H);
       }
+      ctx.restore();
       drawHud(view);
       drawControls(view);
-      if (game.status === "over") drawGameOver(view);
-      else if (view.menu && view.menu.screen === "pause") drawPause(view.menu);
-      else if (view.menu && view.menu.screen === "howto") drawHowTo();
+      const screen = view.menu && view.menu.screen;
+      if (game.status === "over" || screen === "results") drawResults(view);
+      else if (screen === "title") drawTitle(view);
+      else if (screen === "scores") drawScores(view);
+      else if (screen === "pause") drawPause(view.menu);
+      else if (screen === "howto") drawHowTo();
     }
 
-    return { update, draw, explode, particles };
+    return {
+      update, draw, explode, particles, pulse,
+      setReducedMotion(on) { reducedMotion = !!on; if (reducedMotion) shake.time = 0; },
+      isReducedMotion: () => reducedMotion,
+    };
   }
 
-  root.BBRender = { createRenderer, HOW_TO };
+  root.BBRender = { createRenderer, HOW_TO, HOW_TO_ROWS };
 })(globalThis);

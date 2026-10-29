@@ -6,6 +6,7 @@
   const EDGE = 24; // non-formation enemies never go closer than this to the left/right wall
   const CYCLE_LENGTH = 11;
   const CYCLE_SPEEDUP = 0.2; // each finished cycle makes everything 20% faster
+  const CYCLE_FIREUP = 0.25; // ...and lets every shooter fire 25% more often
   const ENEMY_BULLET = { w: 6, h: 10, speed: 200 };
   const FIRE = { firstWave: 2, start: 0.08, perWave: 0.04, max: 0.35 }; // shots/s per shooter, by wave
   const WANDER = { speed: 70, minY: 40, maxY: 300, turnMin: 0.6, turnMax: 1.4 };
@@ -53,6 +54,10 @@
     return Math.min(FIRE.start + FIRE.perWave * (wave - FIRE.firstWave), FIRE.max);
   }
 
+  const fireMult = (wave) => 1 + CYCLE_FIREUP * cycleOf(wave);
+  // shots/s for a full-share shooter: the wave ramp (capped) times the cycle bonus, so wave 40 out-fires wave 20
+  const shotRate = (wave) => fireRate(wave) * fireMult(wave);
+
   function waveScript(wave) {
     const s = WAVE_SCRIPTS[waveInCycle(wave)];
     return {
@@ -95,8 +100,8 @@
 
   function armFire(game, e) {
     const s = SPECIES[e.species];
-    const rate = fireRate(game.wave) * (s.fireShare || 0);
-    e.fireEvery = s.fireEvery || (rate > 0 ? 1 / rate : 0);
+    const rate = shotRate(game.wave) * (s.fireShare || 0);
+    e.fireEvery = s.fireEvery ? s.fireEvery / fireMult(game.wave) : (rate > 0 ? 1 / rate : 0);
     e.fireTimer = e.fireEvery ? e.fireEvery * (0.5 + game.rng()) : Infinity;
   }
 
@@ -283,7 +288,7 @@
 
   root.BBEnemies = {
     FIELD, EDGE, CYCLE_LENGTH, CYCLE_SPEEDUP, ENEMY_BULLET, SPECIES, BOSSES, WAVE_SCRIPTS,
-    cycleOf, waveInCycle, speedMult, fireRate, waveScript, clampX, catmullRom, triangle, TIMED,
+    cycleOf, waveInCycle, speedMult, fireRate, fireMult, shotRate, CYCLE_FIREUP, waveScript, clampX, catmullRom, triangle, TIMED,
     createEnemy, entryPath, spawnEnemies, splitChildren, damage, updateEnemies, moveBullets,
   };
 })(globalThis);
