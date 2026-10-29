@@ -19,6 +19,11 @@
   const SPRITE_SCALE = 1.35; // sprites are drawn a bit larger than their hitbox
   const FLASH_TIME = 0.35;
   const BLINK_HZ = 3; // blinks per second for a new high-score row
+  // the two tabs on the high-scores screen, in canvas pixels
+  const SCORE_TABS = {
+    global: { x: 70, y: 160, w: 160, h: 28, label: "GLOBAL" },
+    device: { x: 250, y: 160, w: 160, h: 28, label: "THIS DEVICE" },
+  };
   const MAX_PARTICLES = 400;
   const STAR_LAYERS = [
     { count: 30, speed: 18, size: 1, sprite: null },
@@ -411,13 +416,25 @@
       });
     }
 
+    // GLOBAL and THIS DEVICE tabs; view.tab is "global" or "device", view.net is { status, list }
     function drawScores(view) {
+      const net = view.net || { status: "offline", list: [] };
+      const global = view.tab === "global", shown = global && net.status === "ok";
       dim(0.82);
       ui.panel(40, 90, W - 80, 440, { stroke: "#fd4" });
-      ui.title("HIGH SCORES", W / 2, 150, 28, "#fd4");
-      if (!(view.scores || []).length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
-      drawTable(view, 195, 28, 20);
-      text("Press Enter, P or tap to go back", W / 2, 500, 14, "#fd4", "center");
+      ui.title("HIGH SCORES", W / 2, 140, 28, "#fd4");
+      for (const name of ["global", "device"]) {
+        const b = SCORE_TABS[name], on = name === (global ? "global" : "device");
+        panel(b.x, b.y, b.w, b.h, on ? "#16306a" : "#0a1030", on ? "#fd4" : "#456");
+        text(b.label, b.x + b.w / 2, b.y + 19, 14, on ? "#fd4" : "#9ab", "center");
+      }
+      const list = shown ? net.list : view.scores || [];
+      const note = !global ? "" : net.status === "loading" ? "Loading..." : net.status === "offline" ? "OFFLINE - showing this device"
+        : net.status === "error" ? "Can't reach the server - showing this device" : "";
+      if (note) text(note, W / 2, 245, 13, "#f90", "center");
+      else if (!list.length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
+      drawTable({ ...view, scores: global && net.status === "loading" ? [] : list, highlight: shown ? null : view.highlight }, 270, 25, 19);
+      text("Left/Right or tap a tab. Enter, P or tap to go back", W / 2, 515, 12, "#fd4", "center");
     }
 
     // new record: three letter slots with up/down boxes and an OK button
@@ -510,5 +527,14 @@
     };
   }
 
-  root.BBRender = { createRenderer, HOW_TO, HOW_TO_ROWS };
+  // which tab (if any) a click at x, y on the high-scores screen hits: "global" | "device" | null
+  function scoreTabHit(x, y) {
+    for (const name of ["global", "device"]) {
+      const b = SCORE_TABS[name];
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return name;
+    }
+    return null;
+  }
+
+  root.BBRender = { createRenderer, HOW_TO, HOW_TO_ROWS, SCORE_TABS, scoreTabHit };
 })(globalThis);

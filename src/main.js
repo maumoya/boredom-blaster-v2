@@ -24,6 +24,11 @@
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
   let scores = scoreStore.load();
+  const net = BBScoresNet.createClient(); // empty API address = offline: the game only uses the local table
+  let netView = { status: net.enabled ? "idle" : "offline", list: [] }; // the GLOBAL tab: offline | idle | loading | ok | error
+  let scoresTab = net.enabled ? "global" : "device";
+  let netLoad = 0; // counts requests so an old answer never replaces a newer one
+  let wasOnScores = false;
   let highlight = null; // { index, until }: the new row blinks until this time (seconds)
   let picker = null; // the initials picker while a new record is being entered
   let runSeconds = 0; // play time of this run, for the score plausibility check
@@ -33,6 +38,15 @@
   const touch = BBInput.createTouch(menu.leftHanded);
   const mouse = BBInput.createMouse(touch);
   let touchSeen = false; // the on-screen buttons only show once a finger has been used
+
+  function refreshGlobal() {
+    if (!net.enabled) return;
+    const mine = ++netLoad;
+    netView = { status: "loading", list: netView.list };
+    net.fetchTop().then((r) => {
+      if (mine === netLoad) netView = r.ok ? { status: "ok", list: r.list } : { status: "error", list: [] };
+    });
+  }
 
   function restart() {
     game = BB.restart();
@@ -54,17 +68,25 @@
   function confirmInitials() {
     const r = scoreStore.add({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, date: Date.now() });
     scores = r.list;
+    if (net.enabled) net.submit({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, seconds: Math.round(runSeconds) });
     highlight = r.index >= 0 ? { index: r.index, until: performance.now() / 1000 + HIGHLIGHT_SECONDS } : null;
     picker = null;
     menu.finish();
   }
   const PICKER_KEYS = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right" };
 
+  const SCORE_TAB_KEYS = ["ArrowLeft", "ArrowRight", "KeyA", "KeyD", "Tab"];
+
   addEventListener("keydown", (e) => {
     if (menu.screen === "initials") {
       if (e.code === "Enter") confirmInitials();
       else if (PICKER_KEYS[e.code]) picker[PICKER_KEYS[e.code]]();
       else return;
+      e.preventDefault();
+      return;
+    }
+    if (menu.screen === "scores" && SCORE_TAB_KEYS.includes(e.code)) {
+      scoresTab = scoresTab === "global" ? "device" : "global";
       e.preventDefault();
       return;
     }
@@ -88,7 +110,13 @@
   function handleScreenClick(x, y) {
     if (menu.screen === "initials") { if (picker.tap(x, y) === "ok") confirmInitials(); return true; }
     if (menu.screen === "results") { restart(); return true; }
-    if (menu.screen === "howto" || menu.screen === "scores") { runMenuAction(menu.activate()); return true; }
+    if (menu.screen === "scores") {
+      const tab = BBRender.scoreTabHit(x, y);
+      if (tab) scoresTab = tab;
+      else runMenuAction(menu.activate());
+      return true;
+    }
+    if (menu.screen === "howto") { runMenuAction(menu.activate()); return true; }
     if (menu.screen === "pause" || menu.screen === "title") {
       const i = menu.itemAt(x, y);
       if (i >= 0) runMenuAction(menu.activate(i));
@@ -150,7 +178,10 @@
         menu.screen = "initials";
       } else menu.finish();
     }
-    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results, highlight, picker });
+    const onScores = menu.screen === "scores";
+    if (onScores && !wasOnScores) refreshGlobal(); // opening the table asks the server again
+    wasOnScores = onScores;
+    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results, highlight, picker, tab: scoresTab, net: netView });
     requestAnimationFrame(frame);
   }
   function start() {
