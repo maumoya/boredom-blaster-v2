@@ -29,6 +29,9 @@
   const BOSS_CHAIN = { blasts: 7, worldBlasts: 12, span: 0.9 }; // a beaten boss goes off in a chain of blasts
   const BOSS_FLASH = 0.35; // seconds of the white-orange flash when a boss dies
   const BOSS_SHAKE = { time: 0.7, mag: 14 };
+  const TRAIL = { points: 14, life: 0.35 }; // engine trail behind the ship
+  const MUZZLE_TIME = 0.08; // muzzle flash after each volley
+  const BANK = { speed: 420, max: 0.22 }; // px/s that gives a full bank; radians at full bank
   const DEFAULT_HALO = "120,90,255";
   const STAR_LAYERS = [
     { count: 30, speed: 18, size: 1, sprite: null },
@@ -88,6 +91,7 @@
     const chains = []; // beaten bosses still going off: { x, y, w, h, left, clock, step, n }
     const bossClock = new WeakMap(); // hurt boss -> seconds until its next puff of smoke or small blast
     const boomFlash = { time: 0 };
+    const shipFx = { trail: [], bank: 0, lastX: null, muzzle: 0, special: 0, fired: new WeakSet() };
     const hitFlash = new WeakMap(); // enemy -> seconds of white flash left
     const lastHp = new WeakMap(); // enemy -> hp seen last frame
     const fx = { full: true, calm: 0 }; // full effects, or stepped down after a slow frame
@@ -216,6 +220,30 @@
         else emit({ x, y, vx: (k - 0.5) * 30, vy: -25, life: 1, size: 12, smoke: true, color: "#555" });
       }
     }
+    // the ship's trail, bank and muzzle flash follow what the game did this frame
+    function stepShip(game, dt) {
+      const s = game.ship;
+      for (const p of shipFx.trail) p.life -= dt;
+      while (shipFx.trail.length && shipFx.trail[0].life <= 0) shipFx.trail.shift();
+      shipFx.muzzle = Math.max(0, shipFx.muzzle - dt);
+      shipFx.special = Math.max(0, shipFx.special - dt);
+      if (!s || game.status !== "playing") { shipFx.lastX = null; shipFx.bank = 0; return; }
+      const x = s.x + s.w / 2;
+      const v = shipFx.lastX === null || dt <= 0 ? 0 : (x - shipFx.lastX) / dt;
+      shipFx.lastX = x;
+      const target = reducedMotion ? 0 : Math.max(-1, Math.min(1, v / BANK.speed));
+      shipFx.bank += (target - shipFx.bank) * Math.min(1, dt * 12);
+      if (fx.full) {
+        shipFx.trail.push({ x, y: s.y + s.h, life: TRAIL.life });
+        if (shipFx.trail.length > TRAIL.points) shipFx.trail.shift();
+      }
+      for (const b of game.bullets) {
+        if (shipFx.fired.has(b)) continue;
+        shipFx.fired.add(b);
+        if (b.pierce) shipFx.special = MUZZLE_TIME * 3;
+        else if (b.dir < 0) shipFx.muzzle = MUZZLE_TIME;
+      }
+    }
     // a few quick sparks where an enemy was hit
     function sparks(x, y) {
       const n = fx.full ? 6 : 2;
@@ -256,6 +284,7 @@
       }
       stepChains(dt);
       stepHurtBosses(game.drones, dt);
+      stepShip(game, dt);
       boomFlash.time = Math.max(0, boomFlash.time - dt);
       if (prev.lives !== null && game.lives < prev.lives) {
         flash.time = FLASH_TIME;
@@ -517,18 +546,57 @@
 
     // MASTERED projectiles glow gold, ULTRA-MAD ones red-hot; ULTRA-MAD faster shots leave a trail
     const PROJECTILE = { 6: "#ffd23c", 7: "#ff4b1f" };
+    // a bolt: a tapered streak behind it (longer with trails), the glowing body and a white-hot core
     function drawBullet(b) {
-      if (b.pierce) { glowRect(b, "special", N.magenta); return; }
+      if (b.pierce) { drawSpecialShot(b); return; }
       const color = PROJECTILE[b.tier] || N.cyan;
-      if (b.trail) {
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = color;
-        ctx.fillRect(b.x, b.dir > 0 ? b.y - 18 : b.y + b.h, b.w, 18);
-        ctx.restore();
-      }
+      const cx = b.x + b.w / 2, back = b.dir > 0 ? -1 : 1, len = b.trail ? 34 : 18;
+      const tailY = b.dir > 0 ? b.y : b.y + b.h;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - b.w / 2, tailY);
+      ctx.lineTo(cx - (b.vx || 0) * 0.04, tailY + back * len);
+      ctx.lineTo(cx + b.w / 2, tailY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
       glowRect(b, "bullet", color);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(cx - 1, b.y + 1, 2, Math.max(2, b.h - 2));
+      ctx.restore();
+    }
+
+    // the special: a magenta energy lance with a spinning ring around its head and a long glowing wake
+    function drawSpecialShot(b) {
+      const cx = b.x + b.w / 2, top = b.y;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = N.magenta;
+      ctx.beginPath();
+      ctx.moveTo(cx - b.w / 2, b.y + b.h);
+      ctx.lineTo(cx, b.y + b.h + 60);
+      ctx.lineTo(cx + b.w / 2, b.y + b.h);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      glowRect(b, "special", N.magenta);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      glow(cx, top + 4, b.w * 1.4, "255,255,255", 0.6);
+      ctx.strokeStyle = "rgba(255,120,255,0.85)";
+      ctx.lineWidth = 2;
+      const spin = reducedMotion ? 0 : scroll * 12;
+      ctx.beginPath();
+      ctx.ellipse(cx, top + 6, b.w * 0.9, b.w * 0.35, 0, spin, spin + Math.PI * 1.4);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // The highest skill tier sets the ship aura: MASTERED pulsing gold with flame spikes and sparkles,
@@ -596,11 +664,20 @@
       const blink = game.invuln > 0 && Math.floor(game.invuln * 10) % 2 === 0;
       if (game.status !== "playing" || blink) return;
       const flicker = 0.8 + 0.2 * Math.sin(t * 40);
+      drawTrail();
       drawAura(game, cx, cy, t);
+      ctx.save(); // the ship banks into its turns: one rotation about its center
+      if (Math.abs(shipFx.bank) > 0.01) {
+        const a = shipFx.bank * BANK.max, c = Math.cos(a), sn = Math.sin(a);
+        ctx.transform(c, sn, -sn, c, cx - c * cx + sn * cy, cy - sn * cx - c * cy);
+      }
       drawEngineFlame(cx, s.y + s.h - 2, t, root.BBSkills.highestTier(game) >= root.BBSkills.ULTRA);
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
       const dmg = Math.max(0, Math.min(3, 3 - game.lives));
       shipArt.draw(ctx, "player", cx, cy, s.w * 1.6, { dmg });
+      drawWingLights(cx, cy, s.w, t);
+      ctx.restore();
+      drawMuzzle(cx, s.y);
       ctx.save(); // rim light around the hull
       ctx.globalCompositeOperation = "lighter";
       glow(cx, cy, s.w * 0.95, "47,243,255", 0.18);
@@ -614,6 +691,48 @@
       }
     }
 
+    // a fading ribbon of engine glow along the ship's recent path
+    function drawTrail() {
+      const n = shipFx.trail.length;
+      if (n < 2) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      shipFx.trail.forEach((p, i) => {
+        const k = p.life / TRAIL.life, size = 3 + 7 * (i / n);
+        glow(p.x, p.y + 6, size * 2, "255,150,60", 0.25 * k);
+        circle(p.x, p.y + 6, size * 0.45 * k, "rgba(160,240,255," + (0.6 * k) + ")");
+      });
+      ctx.restore();
+    }
+    // blinking red and green lights on the wing tips
+    function drawWingLights(cx, cy, w, t) {
+      if (!reducedMotion && Math.sin(t * 6) < -0.2) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      glow(cx - w * 0.72, cy + w * 0.22, 7, "255,60,60", 0.9);
+      glow(cx + w * 0.72, cy + w * 0.22, 7, "60,255,120", 0.9);
+      ctx.restore();
+    }
+    // a bright star at the nose for each volley; the special opens a bigger magenta burst
+    function drawMuzzle(cx, top) {
+      if (shipFx.muzzle <= 0 && shipFx.special <= 0) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      if (shipFx.muzzle > 0) {
+        const k = shipFx.muzzle / MUZZLE_TIME;
+        glow(cx, top - 2, 18 * k + 6, "190,250,255", 0.9 * k);
+        ctx.fillStyle = "rgba(255,255,255," + k + ")";
+        ctx.fillRect(cx - 1, top - 14 * k, 2, 14 * k); // a little star: one tall spike and one wide
+        ctx.fillRect(cx - 7 * k, top - 3, 14 * k, 2);
+      }
+      if (shipFx.special > 0) {
+        const k = shipFx.special / (MUZZLE_TIME * 3);
+        glow(cx, top - 4, 40 * (1.2 - k), "255,90,255", 0.8 * k);
+        circle(cx, top - 4, 30 * (1 - k) + 6, null, "rgba(255,160,255," + k + ")", 2);
+      }
+      ctx.restore();
+    }
+
     // Laser beams go straight up: cyan, MASTERED gold, ULTRA-MAD red. A limited beam stops at its last enemy.
     function drawLaser(game, t) {
       const beam = game.laserBeam;
@@ -621,12 +740,23 @@
       const tier = root.BBSkills.tier(game, "laser"), color = tier >= 7 ? "#ff4b1f" : tier >= 6 ? "#ffd23c" : N.cyan;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
+      const rgb = rgbOf(color);
       beam.cols.forEach((cx, i) => {
-        const top = beam.reach[i] || 0, w = 10 + 2 * Math.sin(t * 60);
-        ctx.fillStyle = color; ctx.globalAlpha = 0.35;
-        ctx.fillRect(cx - w, top, w * 2, game.ship.y - top);
+        const top = beam.reach[i] || 0, w = 10 + 2 * Math.sin(t * 60), len = game.ship.y - top;
+        ctx.fillStyle = color; ctx.globalAlpha = 0.12; // wide soft outer glow
+        ctx.fillRect(cx - w * 2.2, top, w * 4.4, len);
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(cx - w, top, w * 2, len);
         ctx.globalAlpha = 0.95; ctx.fillStyle = "#fff";
-        ctx.fillRect(cx - 2, top, 4, game.ship.y - top);
+        ctx.fillRect(cx - 2, top, 4, len);
+        ctx.globalAlpha = 1;
+        for (let k = 0; k < 3; k++) { // energy rings running up the beam
+          const y = game.ship.y - ((t * 600 + k * len / 3) % Math.max(1, len));
+          ctx.fillStyle = "rgba(" + rgb + ",0.6)";
+          ctx.fillRect(cx - w * 1.3, y, w * 2.6, 2);
+        }
+        glow(cx, top, 26 + 4 * Math.sin(t * 50), rgb, 0.8); // where the beam hits
+        glow(cx, game.ship.y, 22, rgb, 0.7); // where it leaves the ship
       });
       ctx.restore();
     }
@@ -1377,6 +1507,7 @@
 
     return {
       update, draw, explode, particles, pulse,
+      shipFx: () => ({ trail: shipFx.trail.length, bank: shipFx.bank, muzzle: shipFx.muzzle, special: shipFx.special }),
       fullEffects: () => fx.full, bloomCount: () => blooms.length, chainCount: () => chains.length, bossFlash: () => boomFlash.time,
       setReducedMotion(on) { reducedMotion = !!on; if (reducedMotion) shake.time = 0; },
       isReducedMotion: () => reducedMotion,
