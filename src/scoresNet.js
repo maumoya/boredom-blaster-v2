@@ -1,7 +1,7 @@
 // Boredom Blaster global high scores, client side: fetch the top table and submit a score.
 // Plain script like scores.js (load it after scores.js). An empty API address means offline: nothing is ever sent.
 (function (root) {
-  const API = ""; // address of the deployed scores Worker, e.g. "https://boredom-blaster-scores.NAME.workers.dev"
+  const API = "https://boredom-blaster-scores.maumoya85.workers.dev"; // address of the deployed scores Worker, e.g. "https://boredom-blaster-scores.NAME.workers.dev"
   const TIMEOUT_MS = 3000;
 
   // a table from the server, cleaned like the local one; anything odd is dropped
