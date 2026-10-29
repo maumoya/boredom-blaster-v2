@@ -48,6 +48,12 @@
     return Math.max(ZONE_MIN, Math.min(ZONE_MAX, Math.round((W * screenH) / screenW - H)));
   }
 
+  // client px -> game units. The drawing is scaled by width only (createHd: width / W), so both axes use W / rect.width
+  function toGamePoint(clientX, clientY, rect) {
+    const k = W / rect.width;
+    return [(clientX - rect.left) * k, (clientY - rect.top) * k];
+  }
+
   // Where the buttons (and the D-pad, when on) sit. opts: { zone, zoneH, leftHanded, dpad }
   function layoutFor(opts) {
     opts = opts || {};
@@ -364,6 +370,7 @@
   const MENU_LAYOUT = { x: 140, y: 270, w: 200, h: 38, gap: 12 };
   const TITLE_LAYOUT = { x: 140, y: 330, w: 200, h: 42, gap: 14 };
   const SETTINGS_LAYOUT = { x: 60, y: 108, w: 360, h: 26, gap: 2 };
+  const SETTINGS_TOP_LAYOUT = { x: 60, y: 150, w: 360, h: 58, gap: 16 }; // the five big rows
   const GEAR = { x: 436, y: 100, r: 18 }; // the settings gear on the title and pause screens
   const MENU_ACTIONS =["resume", "howto", "swap", "restart"];
   const TITLE_ACTIONS = ["start", "scores", "howto"];
@@ -377,21 +384,50 @@
     m.pad = opts.pad || root.BBKeys.createPad(null); // bb.pad
     m.padCapturing = null; // index into PAD_ACTIONS while the pad remap waits for a button
     m.capturing = null; // the action waiting for its new key on the SETTINGS screen
-    // SETTINGS rows: one per rebindable action, the three switches, then Reset keys and Back
+    // SETTINGS is grouped: the top level has five rows; Capsules, Controls and Sound open a section (m.section)
+    m.section = null; // null (top level) | "capsules" | "controls" | "sound"
+    m.resetArmed = false; // Reset all waits for its second tap
+    m.onResetAll = null; // main.js adds what the menu does not own (the volumes)
+    const SECTIONS = ["capsules", "controls", "sound"];
+    const SECTION_TITLES = { capsules: "CAPSULES", controls: "CONTROLS", sound: "SOUND" };
+    const RANK_ROWS = { bronze: ["Bronze", "skill pick"], silver: ["Silver", "skill pick"], gold: ["Gold", "skill pick"], rainbow: ["Rainbow", "Super Star"], heart: ["Heart", "extra life"] };
+    m.sectionTitle = () => (m.section ? "SETTINGS › " + SECTION_TITLES[m.section] : "SETTINGS");
     m.settingsRows = () => {
-      const K = root.BBKeys;
+      const K = root.BBKeys, back = { type: "back", label: "Back", value: "" };
+      if (m.section === "capsules") {
+        const ranks = (root.BBRewards && root.BBRewards.RANKS) || Object.keys(RANK_ROWS);
+        const fams = (root.BBSkills && root.BBSkills.FAMILIES) || [];
+        return [
+          ...ranks.map((r) => ({ type: "info", label: (RANK_ROWS[r] || [r])[0] + " capsule", value: (RANK_ROWS[r] || [r, ""])[1] })),
+          ...fams.map((f) => ({ type: "info", label: f.name, value: "skill" })),
+          back,
+        ];
+      }
+      if (m.section === "controls") {
+        return [
+          ...K.ACTIONS.map((action) => ({ type: "key", action, label: K.LABELS[action], value: m.capturing === action ? "press a key" : m.keys.label(action) })),
+          ...K.CONTROL_SWITCHES.map((name) => ({ type: "control", name, label: K.CONTROL_LABELS[name], value: m.controls.get(name) ? "ON" : "OFF" })),
+          { type: "padmap", label: "Pad buttons", value: m.padCapturing === null ? "remap" : "press " + K.PAD_LABELS[K.PAD_ACTIONS[m.padCapturing]] },
+          { type: "reset", label: "Reset keys", value: "" },
+          back,
+        ];
+      }
+      if (m.section === "sound") {
+        const sw = (name) => ({ type: "switch", name, label: name === "sounds" ? "Sound FX" : K.SWITCH_LABELS[name], value: m.settings.get(name) ? "ON" : "OFF" });
+        return [sw("music"), sw("sounds"), sw("vibration"), back];
+      }
       return [
-        ...K.ACTIONS.map((action) => ({ type: "key", action, label: K.LABELS[action], value: m.capturing === action ? "press a key" : m.keys.label(action) })),
-        ...K.SWITCHES.map((name) => ({ type: "switch", name, label: K.SWITCH_LABELS[name], value: m.settings.get(name) ? "ON" : "OFF" })),
-        ...K.CONTROL_SWITCHES.map((name) => ({ type: "control", name, label: K.CONTROL_LABELS[name], value: m.controls.get(name) ? "ON" : "OFF" })),
-        { type: "padmap", label: "Pad buttons", value: m.padCapturing === null ? "remap" : "press " + K.PAD_LABELS[K.PAD_ACTIONS[m.padCapturing]] },
-        { type: "reset", label: "Reset keys", value: "" },
-        { type: "back", label: "Back", value: "" },
+        { type: "section", section: "capsules", label: "Capsules", value: "" },
+        { type: "section", section: "controls", label: "Controls", value: "" },
+        { type: "section", section: "sound", label: "Sound", value: "" },
+        { type: "resetall", label: "Reset all", value: m.resetArmed ? "Tap again to reset" : "" },
+        back,
       ];
     };
+    m.settingsLayout = () => (m.section ? SETTINGS_LAYOUT : SETTINGS_TOP_LAYOUT);
     m.openSettings = () => { // the gear on the title and pause screens
       if (m.screen !== "title" && m.screen !== "pause") return false;
-      m.after = m.screen; m.screen = "settings"; m.cursor = 0; m.capturing = null;
+      m.after = m.screen; m.screen = "settings"; m.cursor = 0; m.capturing = null; m.section = null; m.resetArmed = false;
       return true;
     };
     m.gearHit = (x, y) => (m.screen === "title" || m.screen === "pause") && Math.hypot(x - GEAR.x, y - GEAR.y) <= GEAR.r + 8;
@@ -407,7 +443,10 @@
     m.items = () => ["Resume", "How to play", "Left-hand: " + (m.leftHanded ? "ON" : "OFF"), "Restart"];
     m.titleItems = () => TITLE_ITEMS.slice();
     const listFor = () => (m.screen === "title" ? TITLE_ACTIONS : m.screen === "pause" ? MENU_ACTIONS : m.screen === "settings" ? m.settingsRows() : null);
-    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; m.capturing = null; m.padCapturing = null; };
+    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; m.capturing = null; m.padCapturing = null; m.section = null; m.resetArmed = false; };
+    const leaveSection = () => { // back to the top level, cursor on the section just left
+      m.cursor = Math.max(0, SECTIONS.indexOf(m.section)); m.section = null; m.capturing = null; m.padCapturing = null; m.resetArmed = false;
+    };
     // the next pad button while the remap waits: binds the action in turn. "bound" | "done" | "rejected" | null
     m.padCapture = (button) => {
       if (m.padCapturing === null) return null;
@@ -421,6 +460,7 @@
     m.toggle = () => { // P / Esc: pause, resume, or dismiss how-to-play / high scores / settings
       if (m.screen === "playing") { m.screen = "pause"; m.cursor = 0; }
       else if (m.screen === "pause") m.screen = "playing";
+      else if (m.screen === "settings" && m.section) leaveSection();
       else if (m.screen === "howto" || m.screen === "scores" || m.screen === "settings") leaveHowTo();
       return m.screen;
     };
@@ -429,11 +469,12 @@
     m.move = (d) => {
       const list = listFor();
       if (list) m.cursor = (m.cursor + d + list.length) % list.length;
+      if (m.resetArmed && !(m.screen === "settings" && list[m.cursor].type === "resetall")) m.resetArmed = false;
     };
     m.itemAt = (x, y) => {
       const list = listFor();
       if (!list) return -1;
-      const L = m.screen === "title" ? TITLE_LAYOUT : m.screen === "settings" ? SETTINGS_LAYOUT : MENU_LAYOUT;
+      const L = m.screen === "title" ? TITLE_LAYOUT : m.screen === "settings" ? m.settingsLayout() : MENU_LAYOUT;
       for (let i = 0; i < list.length; i++) {
         const top = L.y + i * (L.h + L.gap);
         if (x >= L.x && x <= L.x + L.w && y >= top && y <= top + L.h) return i;
@@ -449,6 +490,19 @@
         const row = m.settingsRows()[index === undefined ? m.cursor : index];
         if (!row) return null;
         if (index !== undefined) m.cursor = index;
+        if (row.type !== "resetall") m.resetArmed = false; // any other row cancels the pending reset
+        if (row.type === "info") return null;
+        if (row.type === "section") { m.section = row.section; m.cursor = 0; return "section"; }
+        if (row.type === "resetall") {
+          if (!m.resetArmed) { m.resetArmed = true; return "arm"; }
+          const K = root.BBKeys;
+          m.keys.reset(); m.pad.reset(); m.capturing = null; m.padCapturing = null; m.resetArmed = false;
+          for (const n of K.SWITCHES) m.settings.set(n, K.SETTINGS_DEFAULTS[n]);
+          for (const n of K.CONTROL_SWITCHES) m.controls.set(n, K.CONTROL_DEFAULTS[n]);
+          if (m.onResetAll) m.onResetAll();
+          return "resetall";
+        }
+        if (row.type === "back" && m.section) { leaveSection(); return "back"; }
         if (row.type === "key") { m.capturing = row.action; return "capture"; }
         if (row.type === "switch") { m.settings.toggle(row.name); return "switch"; }
         if (row.type === "control") { m.controls.toggle(row.name); return "control"; }
@@ -611,8 +665,8 @@
 
   root.BBInput = {
     createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
-    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
-    EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
+    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, SETTINGS_TOP_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
+    toGamePoint, EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,

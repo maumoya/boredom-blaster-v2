@@ -837,16 +837,22 @@
 
     // SETTINGS: every action with its key (click or Enter, then press the new key), the switches, Reset, Back
     function drawSettings(menu) {
-      const L = root.BBInput.SETTINGS_LAYOUT;
+      const L = menu.settingsLayout();
+      const size = L.h > 40 ? 20 : 14;
       dim(0.85);
-      ui.title("SETTINGS", W / 2, 90, 28);
+      ui.title(menu.sectionTitle(), W / 2, 90, menu.section ? 22 : 28);
       menu.settingsRows().forEach((row, i) => {
         const y = L.y + i * (L.h + L.gap), hot = i === menu.cursor;
+        const base = y + L.h / 2 + size / 3;
+        if (row.type === "info") { // read-only list: plain text, no button
+          text(row.label, L.x + 14, base, size, N.cyan);
+          if (row.value) text(row.value, L.x + L.w - 14, base, size, "#fff", "right");
+          return;
+        }
         ui.button(L.x, y, L.w, L.h, "", hot ? "hot" : "idle");
         const ink = hot ? "#1a1000" : "#fff";
-        const base = y + L.h / 2 + 5;
-        text(row.label, L.x + 14, base, 14, ink);
-        if (row.value) text(row.value, L.x + L.w - 14, base, 14, menu.capturing && hot ? N.red : ink, "right");
+        text(row.label, L.x + 14, base, size, ink);
+        if (row.value) text(row.value, L.x + L.w - 14, base, size, menu.capturing && hot ? N.red : ink, "right");
       });
       text("Arrows and Esc always work. Esc or P: back", W / 2, 626, 12, N.yellow, "center");
     }

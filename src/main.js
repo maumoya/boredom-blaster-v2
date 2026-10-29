@@ -38,17 +38,19 @@
   const unlockAudio = () => audio.unlock();
   addEventListener("keydown", unlockAudio);
   addEventListener("pointerdown", unlockAudio);
-  Object.assign(BBInput.SETTINGS_LAYOUT, { h: 22, gap: 1 }); // three more rows (two volumes, presets) need tighter rows
   const baseRows = menu.settingsRows;
-  menu.settingsRows = () => {
+  menu.settingsRows = () => { // the Sound section also holds both volumes and the preset
     const rows = baseRows();
-    const at = rows.findIndex((r) => r.type === "control");
-    rows.splice(at, 0,
+    if (menu.section !== "sound") return rows;
+    const [music, sounds, vibration, back] = rows;
+    return [music,
       { type: "volume", kind: "music", label: "Music volume", value: audio.volume("music") + "%" },
+      sounds,
       { type: "volume", kind: "effects", label: "Effects volume", value: audio.volume("effects") + "%" },
-      { type: "preset", label: "Sound preset", value: audio.preset() });
-    return rows;
+      { type: "preset", label: "Sound preset", value: audio.preset() },
+      vibration, back];
   };
+  menu.onResetAll = () => { audio.setVolume("music", 50); audio.setVolume("effects", 50); };
   const baseActivate = menu.activate;
   menu.activate = (index) => {
     if (menu.screen !== "settings") return baseActivate(index);
@@ -185,7 +187,7 @@
   // pointer position in canvas coordinates (the canvas is scaled by CSS)
   function canvasPoint(e) {
     const r = canvas.getBoundingClientRect();
-    return [(e.clientX - r.left) * (BB.W / r.width), (e.clientY - r.top) * (logicalH / r.height)];
+    return BBInput.toGamePoint(e.clientX, e.clientY, r);
   }
   // returns true when the click was used by a menu or the game-over screen
   function handleScreenClick(x, y) {
