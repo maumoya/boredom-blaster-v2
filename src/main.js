@@ -21,7 +21,10 @@
   }
   const keys = BBKeys.createKeys(storage); // bb.keys
   const settings = BBKeys.createSettings(storage); // bb.settings: music, sounds, vibration
-  const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded(), keys, settings });
+  const controls = BBKeys.createControls(storage); // bb.controls: controls zone below, D-pad
+  const padMap = BBKeys.createPad(storage); // bb.pad: controller buttons
+  const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded(), keys, settings, controls, pad: padMap });
+  const gamepad = BBInput.createGamepad({ pad: padMap });
 
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
@@ -40,6 +43,21 @@
   const touch = BBInput.createTouch(menu.leftHanded);
   const mouse = BBInput.createMouse(touch);
   let touchSeen = false; // the on-screen buttons only show once a finger has been used
+
+  // On a tall screen the buttons get their own zone under the playfield: the canvas grows taller than 3:4.
+  let layoutKey = "";
+  function syncLayout() {
+    const sw = innerWidth, sh = innerHeight;
+    const zone = BBInput.controlsZone(sw, sh, controls.get("below"));
+    const zoneH = zone === "below" ? BBInput.zoneHeightFor(sw, sh) : 0;
+    const dpad = controls.get("dpad");
+    const key = [zone, zoneH, menu.leftHanded, dpad].join("|");
+    if (key === layoutKey) return;
+    layoutKey = key;
+    canvas.height = BB.H + zoneH;
+    canvas.style.aspectRatio = BB.W + " / " + (BB.H + zoneH);
+    touch.setLayout(BBInput.layoutFor({ zone, zoneH, leftHanded: menu.leftHanded, dpad }));
+  }
 
   function refreshGlobal() {
     if (!net.enabled) return;
@@ -87,6 +105,11 @@
       e.preventDefault();
       return;
     }
+    if (menu.screen === "settings" && menu.padCapturing !== null && e.code === "Escape") { // cancel the pad remap
+      menu.padCapturing = null;
+      e.preventDefault();
+      return;
+    }
     if (menu.screen === "settings" && menu.capturing) { // the row is waiting for its new key
       if (menu.capture(e.code) === "bound") keyboard.releaseAll();
       e.preventDefault();
@@ -113,7 +136,7 @@
   // pointer position in canvas coordinates (the canvas is scaled by CSS)
   function canvasPoint(e) {
     const r = canvas.getBoundingClientRect();
-    return [(e.clientX - r.left) * (BB.W / r.width), (e.clientY - r.top) * (BB.H / r.height)];
+    return [(e.clientX - r.left) * (canvas.width / r.width), (e.clientY - r.top) * (canvas.height / r.height)];
   }
   // returns true when the click was used by a menu or the game-over screen
   function handleScreenClick(x, y) {
@@ -162,22 +185,43 @@
   }
 
   // merge keyboard and touch into one input for the game; one-shot actions fire here
+  // the controller in menus: stick or D-pad up/down moves, A picks; while the Settings pad remap waits, the next button binds
+  function padMenu() {
+    const nav = gamepad.takeNav();
+    if (menu.padCapturing !== null) {
+      const b = gamepad.newButton();
+      if (b !== null) menu.padCapture(b);
+      return true;
+    }
+    if (menu.screen === "playing") return false;
+    if (menu.screen === "initials") { if (nav.confirm) confirmInitials(); return true; }
+    if (menu.screen === "settings" && menu.capturing) return true;
+    if (nav.up) menu.move(-1);
+    if (nav.down) menu.move(1);
+    if (nav.confirm) runMenuAction(menu.activate());
+    return false;
+  }
+
   function readInput() {
-    const ka = keyboard.axes(), ta = touch.axes();
+    gamepad.poll();
+    const padBusy = padMenu(); // a remap or the initials picker owns the pad this frame
+    const ka = keyboard.axes(), ta = touch.axes(), pa = gamepad.axes();
     const input = {
-      mx: ka.x || ta.x, my: ka.y || ta.y,
-      fire: keyboard.fire() || touch.fire(),
+      mx: ka.x || ta.x || pa.x, my: ka.y || ta.y || pa.y,
+      fire: keyboard.fire() || touch.fire() || gamepad.fire(),
     };
     const kp = keyboard.takePressed(), tp = touch.takePressed();
-    if (kp.pause && game.status === "playing") menu.toggle();
-    if (kp.mute) { // M: all sound off, or back on
+    const pp = gamepad.takePressed();
+    if (padBusy) Object.keys(pp).forEach((a) => { pp[a] = false; });
+    if ((kp.pause || pp.pause) && game.status === "playing") menu.toggle();
+    if (kp.mute || pp.mute) { // M or the pad's Y: all sound off, or back on
       const on = !(settings.get("music") || settings.get("sounds"));
       settings.set("music", on);
       settings.set("sounds", on);
     }
     if (menu.screen !== "playing") return {};
-    if (kp.special || tp.special) BB.special(game);
-    if ((kp.kaboom || tp.kaboom) && BB.kaboom(game)) stats.kaboomUsed();
+    if (kp.special || tp.special || pp.special) BB.special(game);
+    if ((kp.kaboom || tp.kaboom || pp.kaboom) && BB.kaboom(game)) stats.kaboomUsed();
     return input;
   }
 
@@ -185,6 +229,7 @@
   function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
+    syncLayout();
     const input = readInput();
     game.paused = menu.screen !== "playing";
     const livesBefore = game.lives;
@@ -203,7 +248,7 @@
     const onScores = menu.screen === "scores";
     if (onScores && !wasOnScores) refreshGlobal(); // opening the table asks the server again
     wasOnScores = onScores;
-    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results, highlight, picker, tab: scoresTab, net: netView });
+    renderer.draw({ game, menu, best, touch, touchSeen, padConnected: gamepad.connected(), firing: keyboard.fire() || gamepad.fire(), time: now / 1000, scores, results, highlight, picker, tab: scoresTab, net: netView });
     requestAnimationFrame(frame);
   }
   function start() {

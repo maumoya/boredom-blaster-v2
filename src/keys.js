@@ -77,7 +77,63 @@
     };
   }
 
+  // ---- touch layout switches (bb.controls): kept apart from the sound switches ----
+  const CONTROLS_KEY = "bb.controls";
+  const CONTROL_SWITCHES = ["below", "dpad"];
+  const CONTROL_LABELS = { below: "Controls below", dpad: "D-pad" };
+  const CONTROL_DEFAULTS = { below: true, dpad: false };
+
+  function createControls(storage) {
+    const s = { ...CONTROL_DEFAULTS };
+    const stored = parse(read(storage, CONTROLS_KEY));
+    if (stored) for (const k of CONTROL_SWITCHES) if (typeof stored[k] === "boolean") s[k] = stored[k];
+    const save = () => write(storage, CONTROLS_KEY, JSON.stringify(s));
+    return {
+      get: (name) => !!s[name],
+      all: () => ({ ...s }),
+      set(name, on) { if (!CONTROL_SWITCHES.includes(name)) return false; s[name] = !!on; save(); return true; },
+      toggle(name) { return this.set(name, !s[name]) ? s[name] : null; },
+    };
+  }
+
+  // ---- physical controller (Gamepad API, "standard" layout) buttons, saved in bb.pad ----
+  const PAD_KEY = "bb.pad";
+  const PAD_DEFAULTS = { fire: 0, kaboom: 1, special: 2, mute: 3, pause: 9 }; // A, B, X, Y, Menu
+  const PAD_ACTIONS = Object.keys(PAD_DEFAULTS);
+  const PAD_LABELS = { fire: "Fire (auto)", kaboom: "Kaboom", special: "Special", mute: "Mute", pause: "Pause" };
+  const PAD_R1 = 5; // always Special, whatever is remapped
+  const PAD_BUTTONS = 17; // the standard mapping has buttons 0-16
+
+  function createPad(storage) {
+    const map = { ...PAD_DEFAULTS };
+    const stored = parse(read(storage, PAD_KEY));
+    if (stored) {
+      const loaded = { ...PAD_DEFAULTS };
+      for (const a of PAD_ACTIONS) if (Number.isInteger(stored[a]) && stored[a] >= 0 && stored[a] < PAD_BUTTONS) loaded[a] = stored[a];
+      const codes = PAD_ACTIONS.map((a) => loaded[a]);
+      if (new Set(codes).size === codes.length && !codes.includes(PAD_R1)) Object.assign(map, loaded);
+    }
+    const save = () => write(storage, PAD_KEY, JSON.stringify(map));
+    return {
+      get: (action) => map[action],
+      all: () => ({ ...map }),
+      actionFor(button) { return button === PAD_R1 ? "special" : PAD_ACTIONS.find((a) => map[a] === button) || null; },
+      // binds a button index; one held by another action is swapped over. False for unknown actions and bad indexes.
+      rebind(action, button) {
+        if (!(action in PAD_DEFAULTS) || !Number.isInteger(button) || button < 0 || button >= PAD_BUTTONS || button === PAD_R1) return false;
+        const other = PAD_ACTIONS.find((a) => a !== action && map[a] === button);
+        if (other) map[other] = map[action];
+        map[action] = button;
+        save();
+        return true;
+      },
+      reset() { Object.assign(map, PAD_DEFAULTS); save(); },
+    };
+  }
+
   root.BBKeys = {
+    CONTROLS_KEY, CONTROL_SWITCHES, CONTROL_LABELS, CONTROL_DEFAULTS, createControls,
+    PAD_KEY, PAD_DEFAULTS, PAD_ACTIONS, PAD_LABELS, PAD_R1, createPad,
     DEFAULTS, ACTIONS, LABELS, FIXED, SWITCHES, SWITCH_LABELS, SETTINGS_DEFAULTS, KEYS_KEY, SETTINGS_KEY,
     keyName, createKeys, createSettings,
   };

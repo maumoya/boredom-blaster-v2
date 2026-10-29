@@ -331,37 +331,40 @@
     function drawControls(view) {
       const touch = view.touch, game = view.game, BB = root.BB, IN = root.BBInput;
       const B = touch ? touch.buttons() : IN.buttonsFor(!!(view.menu && view.menu.leftHanded));
+      const layout = touch && touch.layout ? touch.layout() : null;
       const held = (name) => !!touch && touch.isHeld(name);
+      if (layout && layout.zoneH) { // the controls zone under the playfield
+        ctx.fillStyle = "#070b1e";
+        ctx.fillRect(0, H, W, layout.zoneH);
+        ctx.fillStyle = "rgba(77,221,255,0.5)";
+        ctx.fillRect(0, H, W, 2);
+      }
+      if (view.padConnected) return; // a physical controller replaces the touch buttons
+      const t = view.time || 0, glowing = !reducedMotion;
       ctx.save();
-      ctx.globalAlpha = CONTROLS_ALPHA; // no tray: the buttons float over the playfield
+      ctx.globalAlpha = layout && layout.zoneH ? 1 : CONTROLS_ALPHA; // in the overlay the rings float see-through
 
       const firing = held("fire") || !!view.firing;
-      ui.iconButton(B.fire.x, B.fire.y, B.fire.r, "fire", { state: firing ? "pressed" : "idle", color: "#ff7a5a", label: "FIRE" });
+      ui.ringButton(B.fire.x, B.fire.y, B.fire.r, "fire", { state: firing ? "pressed" : "idle", color: "#ff7a5a", ready: glowing, time: t });
 
-      const ready = 1 - game.specialCooldown / BB.SPECIAL.cooldown;
+      const progress = Math.max(0, Math.min(1, 1 - game.specialCooldown / BB.SPECIAL.cooldown));
       const justFired = game.specialCooldown > BB.SPECIAL.cooldown - 0.15;
-      const specState = held("special") || justFired ? "pressed" : "idle";
-      ui.iconButton(B.special.x, B.special.y, B.special.r, "spec", { state: specState, color: "#4df", label: "SPEC" });
-      ctx.beginPath(); // cooldown ring, full and bright when ready
-      ctx.arc(B.special.x, B.special.y, B.special.r + 5, -Math.PI / 2, -Math.PI / 2 + Math.max(0, Math.min(1, ready)) * Math.PI * 2);
-      ctx.strokeStyle = ready >= 1 ? "#4df" : "rgba(255,255,255,0.7)";
-      ctx.lineWidth = 4;
-      ctx.stroke();
-
-      const empty = game.kaboomCharges <= 0;
-      ui.iconButton(B.kaboom.x, B.kaboom.y, B.kaboom.r, "boom", {
-        state: empty ? "disabled" : held("kaboom") ? "pressed" : "idle", color: "#fd4", label: "BOOM",
+      ui.ringButton(B.special.x, B.special.y, B.special.r, "spec", {
+        state: held("special") || justFired ? "pressed" : "idle", color: "#4df", cooldown: progress, ready: glowing && progress >= 1, time: t,
       });
-      for (let i = 0; i < BB.KABOOM.maxCharges; i++) {
-        circle(B.kaboom.x - 12 + i * 12, B.kaboom.y + B.kaboom.r + 9, 4, i < game.kaboomCharges ? "#fd4" : "rgba(255,255,255,0.2)");
-      }
+
+      ui.ringButton(B.kaboom.x, B.kaboom.y, B.kaboom.r, "boom", {
+        state: game.kaboomCharges <= 0 ? "disabled" : held("kaboom") ? "pressed" : "idle", color: "#fd4",
+        segments: { count: game.kaboomCharges, total: BB.KABOOM.maxCharges }, ready: glowing && game.kaboomCharges > 0, time: t,
+      });
+      if (layout && layout.dpad) ui.dpad(layout.dpad.x, layout.dpad.y, layout.dpad.r, touch.axes(), "#4df");
       ctx.restore();
-      drawStick(touch);
+      drawStick(touch, !!(layout && layout.dpad));
     }
 
     // floating stick: dark base ring and a glossy knob
-    function drawStick(touch) {
-      if (!touch) return;
+    function drawStick(touch, hidden) {
+      if (!touch || hidden) return;
       const st = touch.stick.state;
       if (!st.active) return;
       circle(st.cx, st.cy, root.BBInput.STICK.max, "rgba(20,40,90,0.35)", "rgba(160,200,255,0.5)", 3);

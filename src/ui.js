@@ -103,6 +103,76 @@
       ctx.restore();
     }
 
+    // glowing neon ring button, no text. opts: { state: "idle"|"pressed"|"disabled", color, time,
+    //   ready (pulses), cooldown (0..1 progress arc, shown while below 1), segments: { count, total } (charge arcs) }
+    function ringButton(cx, cy, r, icon, opts) {
+      const o = opts || {}, state = o.state || "idle", color = state === "disabled" ? "#5a6070" : o.color || "#4df";
+      const lit = state === "pressed", breath = o.ready && !lit ? 0.5 + 0.5 * Math.sin((o.time || 0) * 5) : 0;
+      const arcAt = (rad, from, to, style, width) => {
+        ctx.beginPath(); ctx.arc(cx, cy, rad, from, to);
+        ctx.strokeStyle = style; ctx.lineWidth = width; ctx.stroke();
+      };
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); // body: dark glass, filled with colour while pressed
+      ctx.fillStyle = "rgba(6,10,28,0.7)";
+      ctx.fill();
+      if (lit) { // pressed: the ring fills with its colour
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+        ctx.fillStyle = color; ctx.globalAlpha *= 0.45; ctx.fill(); ctx.globalAlpha /= 0.45;
+      }
+      ctx.shadowColor = color; // colour bloom
+      ctx.shadowBlur = state === "disabled" ? 0 : lit ? 30 : 12 + 12 * breath;
+      arcAt(r, 0, TAU, color, lit ? 5 : 3 + breath);
+      ctx.shadowBlur = 0;
+      const track = r + 8, start = -Math.PI / 2;
+      if (o.cooldown !== undefined && o.cooldown !== null && o.cooldown < 1) {
+        arcAt(track, 0, TAU, "rgba(255,255,255,0.15)", 4);
+        arcAt(track, start, start + Math.max(0, o.cooldown) * TAU, "#fff", 4);
+      }
+      const seg = o.segments;
+      if (seg && seg.total > 0) {
+        const span = TAU / seg.total, gap = Math.min(0.3, span * 0.3);
+        for (let i = 0; i < seg.total; i++) {
+          const on = i < seg.count;
+          ctx.shadowColor = color; ctx.shadowBlur = on ? 10 : 0;
+          arcAt(track, start + i * span + gap / 2, start + (i + 1) * span - gap / 2, on ? color : "rgba(255,255,255,0.18)", 4);
+        }
+        ctx.shadowBlur = 0;
+      }
+      icon_(icon, cx, cy, r * 1.05, state === "disabled" ? "#7a8090" : lit ? "#fff" : color);
+      ctx.restore();
+    }
+
+    // D-pad: a plus shape with four arrow pads; `dir` is the held direction { x, y } so the pressed arms glow
+    function dpad(cx, cy, r, dir, color) {
+      const d = dir || { x: 0, y: 0 }, c = color || "#4df", arm = r * 0.62, half = r * 0.3;
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx - half, cy - r); ctx.lineTo(cx + half, cy - r); ctx.lineTo(cx + half, cy - half); ctx.lineTo(cx + r, cy - half);
+      ctx.lineTo(cx + r, cy + half); ctx.lineTo(cx + half, cy + half); ctx.lineTo(cx + half, cy + r); ctx.lineTo(cx - half, cy + r);
+      ctx.lineTo(cx - half, cy + half); ctx.lineTo(cx - r, cy + half); ctx.lineTo(cx - r, cy - half); ctx.lineTo(cx - half, cy - half);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(6,10,28,0.7)"; ctx.fill();
+      ctx.shadowColor = c; ctx.shadowBlur = 12;
+      ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.stroke();
+      ctx.shadowBlur = 0;
+      const arrows = [[0, -1, "up"], [0, 1, "down"], [-1, 0, "left"], [1, 0, "right"]];
+      for (const [ax, ay] of arrows) {
+        const on = (ax && Math.sign(d.x) === ax) || (ay && Math.sign(d.y) === ay);
+        const px = cx + ax * arm, py = cy + ay * arm, s = r * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(px + ax * s, py + ay * s);
+        ctx.lineTo(px - ax * s - ay * s, py - ay * s + ax * s);
+        ctx.lineTo(px - ax * s + ay * s, py - ay * s - ax * s);
+        ctx.closePath();
+        ctx.fillStyle = on ? "#fff" : c; ctx.globalAlpha = on ? 1 : 0.6; ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
     function title(str, cx, y, size, color) {
       ctx.save();
       ctx.font = "bold " + size + "px monospace";
@@ -200,7 +270,7 @@
       ctx.restore();
     }
 
-    return { panel, button, iconButton, title, stars, icon: icon_, roundPath };
+    return { panel, button, iconButton, ringButton, dpad, title, stars, icon: icon_, roundPath };
   }
 
   root.BBUI = { createUI, ICONS, PALETTE };
