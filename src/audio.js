@@ -4,8 +4,9 @@
 // vibrate or the DOM is missing, and no sound starts before unlock() runs from a user gesture.
 (function (root) {
   const VOICE_CAP = 12; // sound effects playing at once
-  const STEP = 10, VOLUME_DEFAULTS = { musicVolume: 40, effectsVolume: 50 };
+  const STEP = 10, VOLUME_DEFAULTS = { musicVolume: 50, effectsVolume: 50 }, VOLUMES_V = 2;
   const SHAKE_MS = 250, VIBRATE_MS = 80;
+  const NUKE_SHAKE_MS = 400, NUKE_VIBRATE = [40, 30, 80]; // the Kaboom blast: shake 400 ms, buzz-pause-buzz
 
   // ---- sound effects: one definition per shot type and event, all different ----
   // wave: oscillator shape; f0 -> f1: pitch sweep in Hz; dur: seconds; vol: 0..1; tail: second voice (Hz ratio)
@@ -13,6 +14,7 @@
     shot: { wave: "square", f0: 880, f1: 440, dur: 0.07, vol: 0.07 },
     special: { wave: "triangle", f0: 220, f1: 1100, dur: 0.28, vol: 0.28, ratio: 1.5 },
     kaboom: { wave: "triangle", f0: 180, f1: 30, dur: 0.7, vol: 0.45, ratio: 0.5 },
+    nuke: { wave: "square", f0: 120, f1: 20, dur: 1.1, vol: 0.5, ratio: 0.37 },
     explode: { wave: "triangle", f0: 260, f1: 50, dur: 0.22, vol: 0.28 },
     bossExplode: { wave: "square", f0: 200, f1: 25, dur: 0.9, vol: 0.45, ratio: 0.51 },
     hit: { wave: "square", f0: 440, f1: 70, dur: 0.4, vol: 0.4, ratio: 1.06 },
@@ -62,20 +64,20 @@
   }
   const THEMES = {};
   for (const k of Object.keys(THEME_SPECS)) THEMES[k] = buildTheme(THEME_SPECS[k]);
-  // each world (5 waves) lifts the whole loop by these semitones, then the table repeats
+  // each of the five worlds (100 waves) lifts the whole play loop by these semitones; after world 5 the worlds repeat
   const WORLD_SHIFT = [0, 2, 4, -3, 5, 7, -1, 3];
-  const WAVES_PER_WORLD = 5;
-  const worldOf = (wave) => Math.floor((Math.max(1, wave) - 1) / WAVES_PER_WORLD) + 1;
+  const WAVES_PER_WORLD = 100, WORLD_COUNT = 5;
+  const worldOf = (wave) => (Math.floor((Math.max(1, wave) - 1) / WAVES_PER_WORLD) % WORLD_COUNT) + 1;
   const transposeFor = (world) => WORLD_SHIFT[(Math.max(1, world) - 1) % WORLD_SHIFT.length];
   const midiHz = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
   // ---- presets: switches plus volumes ----
   const PRESETS = {
-    "All on": { music: true, sounds: true, musicVolume: 40, effectsVolume: 50 },
-    "Music only": { music: true, sounds: false, musicVolume: 40, effectsVolume: 50 },
-    "Effects only": { music: false, sounds: true, musicVolume: 40, effectsVolume: 50 },
+    "All on": { music: true, sounds: true, musicVolume: 50, effectsVolume: 50 },
+    "Music only": { music: true, sounds: false, musicVolume: 50, effectsVolume: 50 },
+    "Effects only": { music: false, sounds: true, musicVolume: 50, effectsVolume: 50 },
     "Quiet": { music: true, sounds: true, musicVolume: 30, effectsVolume: 30 },
-    "Silent": { music: false, sounds: false, musicVolume: 40, effectsVolume: 50 },
+    "Silent": { music: false, sounds: false, musicVolume: 50, effectsVolume: 50 },
   };
   const PRESET_NAMES = Object.keys(PRESETS);
 
@@ -93,9 +95,11 @@
       return C ? new C() : null;
     };
     const stored = (storage && readJson(storage, "bb.settings")) || {};
+    // volumes saved before volumesV 2 (the old defaults) reset once to the defaults
+    const keep = stored.volumesV === VOLUMES_V;
     const vol = {
-      musicVolume: Number.isFinite(stored.musicVolume) ? clampVolume(stored.musicVolume) : VOLUME_DEFAULTS.musicVolume,
-      effectsVolume: Number.isFinite(stored.effectsVolume) ? clampVolume(stored.effectsVolume) : VOLUME_DEFAULTS.effectsVolume,
+      musicVolume: keep && Number.isFinite(stored.musicVolume) ? clampVolume(stored.musicVolume) : VOLUME_DEFAULTS.musicVolume,
+      effectsVolume: keep && Number.isFinite(stored.effectsVolume) ? clampVolume(stored.effectsVolume) : VOLUME_DEFAULTS.effectsVolume,
     };
     const on = (name) => (settings ? settings.get(name) : true);
     let ctx = null, master = null, musicGain = null, sfxGain = null, sfxFilter = null, leadFilter = null, failed = false;
@@ -105,8 +109,9 @@
     // the settings object only saves its own switches: write them together with the volumes
     function persist() {
       if (!storage) return;
-      try { storage.setItem("bb.settings", JSON.stringify({ ...(settings ? settings.all() : {}), ...vol })); } catch (e) { /* blocked */ }
+      try { storage.setItem("bb.settings", JSON.stringify({ ...(settings ? settings.all() : {}), ...vol, volumesV: VOLUMES_V })); } catch (e) { /* blocked */ }
     }
+    if (!keep && Object.keys(stored).length) persist();
     if (settings && typeof settings.set === "function") {
       const original = settings.set.bind(settings);
       settings.set = (name, value) => { const ok = original(name, value); if (ok) { persist(); refresh(); } return ok; };
@@ -243,7 +248,7 @@
       if (!game) return [];
       const now = {
         game, bullets: new Set(game.bullets), drones: new Set(game.drones), capsules: new Set(game.capsules || []),
-        lives: game.lives, wave: game.wave, status: game.status, shield: game.shield || 0, charges: game.kaboomCharges || 0,
+        lives: game.lives, wave: game.wave, status: game.status, shield: game.shield || 0, charges: game.kaboomCharges || 0, nukes: game.nukes || 0,
       };
       const heard = [];
       if (prev && prev.game === game) {
@@ -252,6 +257,8 @@
         if (fresh.some((b) => b.pierce)) heard.push("special");
         const gone = [...prev.drones].filter((d) => !now.drones.has(d));
         if (now.charges < prev.charges) heard.push("kaboom");
+        if (now.nukes > prev.nukes) heard.push("nuke"); // the blast; its kills add no explosion sounds
+        else if (now.charges < prev.charges) { /* the launch frame: just the missile */ }
         else if (gone.some((d) => d.boss)) heard.push("bossExplode");
         else if (gone.length) heard.push("explode");
         if (now.lives < prev.lives) heard.push("hit");
@@ -311,14 +318,22 @@
       } catch (e) { /* ignore */ }
       return iosTap() ? "haptic" : null;
     }
-    return { hit };
+    // the Kaboom blast: [40, 30, 80] on Android, a haptic tick on iPhone; same return values as hit()
+    function nuke() {
+      if (!enabled()) return null;
+      try {
+        if (nav && typeof nav.vibrate === "function") { nav.vibrate(NUKE_VIBRATE); return "vibrate"; }
+      } catch (e) { /* ignore */ }
+      return iosTap() ? "haptic" : null;
+    }
+    return { hit, nuke };
   }
 
   const SPEAKER = { x: 396, y: 16, r: 14 }; // the speaker icon in the top bar, left of the pause button
   const speakerHit = (x, y) => Math.hypot(x - SPEAKER.x, y - SPEAKER.y) <= SPEAKER.r + 4;
 
   root.BBAudio = {
-    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, SOUNDS, SOUND_IDS, THEMES, MOTIFS, SCALES, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
+    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, NUKE_SHAKE_MS, NUKE_VIBRATE, WORLD_COUNT, SOUNDS, SOUND_IDS, THEMES, MOTIFS, SCALES, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
     worldOf, transposeFor, midiHz, createAudio, createHaptics,
   };
 })(globalThis);

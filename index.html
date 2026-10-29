@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Boredom Blaster v2 (test)</title>
 <meta name="robots" content="noindex">
 <meta name="description" content="Free space shooter. Tap and play: bosses, power-ups and global high scores.">
@@ -10,21 +12,22 @@
 <meta property="og:url" content="https://maumoya.github.io/boredom-blaster-v2/">
 <meta property="og:title" content="Boredom Blaster">
 <meta property="og:description" content="Free space shooter. Tap and play: bosses, power-ups and global high scores.">
-<meta property="og:image" content="https://maumoya.github.io/boredom-blaster-v2/preview.png?v=6c4b17e">
+<meta property="og:image" content="https://maumoya.github.io/boredom-blaster-v2/preview.png?v=8bcbca6">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="apple-touch-icon" href="preview.png">
 <style>
   html, body { margin: 0; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; }
-  canvas { height: 100vh; max-width: 100vw; aspect-ratio: 3 / 4; background: #050514; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { box-sizing: border-box; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  canvas { height: 100vh; height: 100dvh; max-height: 100%; max-width: 100vw; aspect-ratio: 3 / 4; background: #050514; touch-action: none; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
 <body>
 <canvas id="screen"></canvas>
 <script>
 (function () {
-  var fallback = ["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/assets.js","src/ui.js","src/render.js","src/main.js"];
+  var fallback = ["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/assets.js","src/ui.js","src/worlds.js","src/render.js","src/main.js"];
   function load(list, v, i) {
     if (i >= list.length) return;
     var s = document.createElement("script");

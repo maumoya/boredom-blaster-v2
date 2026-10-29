@@ -148,6 +148,7 @@
       stick,
       setLeftHanded(on) { swapped = !!on; layout = null; reset(); },
       setLayout(l) { layout = l; swapped = !!(l && l.leftHanded); reset(); },
+      releaseAll: reset, // every finger and the stick let go; queued one-shot presses stay
       layout: () => layout,
       buttons,
       setOwned(o) { owned = { laser: !!(o && o.laser), twin: !!(o && o.twin) }; },
@@ -210,6 +211,15 @@
       up() { down = false; touch.end(MOUSE_ID); },
       isDown: () => down,
     };
+  }
+
+  // Let go of every held input at once (blur, hidden page, screen change, picker opening, new run), so the
+  // ship never keeps steering on a pointer whose end event never came. Takes the live input objects.
+  function releaseAll(inputs) {
+    const { touch, mouse, keyboard } = inputs || {};
+    if (touch) touch.releaseAll();
+    if (mouse) mouse.up();
+    if (keyboard) keyboard.releaseAll();
   }
 
   const HELD_ACTIONS = ["left", "right", "up", "down", "fire"];
@@ -603,7 +613,7 @@
     createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
     STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
     EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
-    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
+    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
   };

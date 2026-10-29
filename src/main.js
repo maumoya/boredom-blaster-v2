@@ -112,13 +112,17 @@
     });
   }
 
+  // ?wave=N starts every run at wave N (debug)
+  const startOpts = () => ({ wave: BBWorlds.startWave(location.search) });
+
   function restart() {
-    game = BB.restart();
+    game = BB.restart(startOpts());
     stats = BBInput.createRunStats();
     results = null;
     picker = null;
     runSeconds = 0;
     menu.screen = "playing";
+    letGo();
   }
 
   function runMenuAction(action) {
@@ -224,12 +228,16 @@
     if (e.pointerType === "mouse") mouse.move(x, y);
     else touch.move(e.pointerId, x, y);
   });
-  for (const type of ["pointerup", "pointercancel"]) {
+  // lostpointercapture follows every captured pointerup: it ends only its own pointer, never the other thumb
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     canvas.addEventListener(type, (e) => {
       if (e.pointerType === "mouse") mouse.up();
       else touch.end(e.pointerId);
     });
   }
+  const letGo = () => BBInput.releaseAll({ touch, mouse, keyboard });
+  addEventListener("blur", letGo);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) letGo(); });
 
   // merge keyboard and touch into one input for the game; one-shot actions fire here
   // the controller in menus: stick or D-pad up/down moves, A picks; while the Settings pad remap waits, the next button binds
@@ -269,16 +277,21 @@
   }
 
   let last = performance.now();
+  let lastScreen = menu.screen, wasPickerOpen = false;
   function frame(now) {
     const rawDt = (now - last) / 1000, dt = Math.min(rawDt, 0.05);
     last = now;
+    const pickerOpen = !!BBSkills.picker;
+    if (menu.screen !== lastScreen || (pickerOpen && !wasPickerOpen)) letGo();
+    lastScreen = menu.screen; wasPickerOpen = pickerOpen;
     syncLayout();
     hd.frame(rawDt); // resize / zoom / slow-frame step-down redo the backing store; also resets the scale
     const input = readInput();
     game.paused = menu.screen !== "playing";
-    const livesBefore = game.lives;
+    const livesBefore = game.lives, nukesBefore = game.nukes;
     BB.update(game, dt, input);
-    if (game.lives < livesBefore) haptics.hit(); // Android buzz or iPhone haptic tick; shake and red flash come from the renderer
+    if (game.nukes > nukesBefore) haptics.nuke(); // the Kaboom blast: [40, 30, 80]
+    else if (game.lives < livesBefore) haptics.hit(); // Android buzz or iPhone haptic tick; shake and red flash come from the renderer
     audio.observe(game);
     audio.setTheme(menu.screen === "playing" || menu.screen === "pause" ? (game.drones.some((d) => d.boss) ? "boss" : "play") : "title", game.wave);
     audio.tick();
@@ -286,7 +299,7 @@
     if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);
     if (game.status === "over" && menu.screen === "playing") { // the run just ended: results replace game over
-      results = stats.result(game);
+      results = BBWorlds.withMax(stats.result(game), game); // adds the maximum score, the percentage and the 70 % star rule
       if (BBScores.plausible(game.score, game.wave, runSeconds) && BBScores.qualifies(scores, game.score)) {
         picker = BBInput.createInitialsPicker();
         menu.screen = "initials";
@@ -299,7 +312,7 @@
     requestAnimationFrame(frame);
   }
   function start() {
-    game = BB.createGame();
+    game = BB.createGame(startOpts());
     last = performance.now();
     requestAnimationFrame(frame);
   }

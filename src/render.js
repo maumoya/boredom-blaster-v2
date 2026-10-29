@@ -47,23 +47,30 @@
       { icon: "weapon", text: "Capsules: pick a skill (1-7, arrows + Enter)" },
       { icon: "shield", text: "Silver: +shield, gold: 2 picks, heart: life" },
       { icon: "pause", text: "Pause: " + k("pause") + " or Esc" },
+      { icon: "star", text: "iPhone: Share › Add to Home Screen for full screen" },
     ];
   }
   const HOW_TO_ROWS = howToRows(root.BBKeys.createKeys(null));
   const HOW_TO = HOW_TO_ROWS.map((r) => r.text);
   const SHAKE = { time: 0.25, mag: 6 }; // screen shake after a lost life
+  const NUKE_SHAKE = { time: 0.4, mag: 12 }; // ...and after the Kaboom blast
+  const NUKE_FLASH = { time: 0.22, dimmed: 0.35 }; // the white flash; a share of it with reduced motion
+  const CARD_TIME = 2.8; // seconds a world title card stays up
+  const STAGE_COLOR = { ice: "200,235,255", crystals: "90,255,210" };
   const PULSE = { depth: 0.06, speed: 4 }; // gentle breathing of the title and the replay prompt
   const GOAL_ICON = { miniboss: "escort", kaboom: "boom", weapon: "weapon" };
 
   // opts.reducedMotion: no pulses, no background drift, no screen shake
   function createRenderer(ctx, assets, opts) {
     let reducedMotion = !!(opts && opts.reducedMotion);
-    const shake = { time: 0 };
+    const shake = { time: 0, max: SHAKE.time, mag: SHAKE.mag };
+    let card = null; // the world title card: { text, life }
+    let info = null; // the world of the current wave (src/worlds.js), set each frame
     const particles = [];
     const rings = []; // explosion shockwaves
     const ui = root.BBUI.createUI(ctx);
     const flash = { time: 0 };
-    let prev = { drones: [], lives: null, wave: null };
+    let prev = { drones: [], lives: null, wave: null, nukes: 0 };
     let scroll = 0;
     // fixed pseudo-random layout so the background is stable between frames
     const frac = (i, k) => ((i * k) % 1000) / 1000;
@@ -130,11 +137,17 @@
       }
       if (prev.lives !== null && game.lives < prev.lives) {
         flash.time = FLASH_TIME;
-        if (!reducedMotion) shake.time = SHAKE.time;
+        if (!reducedMotion) Object.assign(shake, { time: SHAKE.time, max: SHAKE.time, mag: SHAKE.mag });
       }
-      prev = { drones: game.drones.slice(), lives: game.lives, wave: game.wave };
+      if ((game.nukes || 0) > prev.nukes && !reducedMotion) Object.assign(shake, { time: NUKE_SHAKE.time, max: NUKE_SHAKE.time, mag: NUKE_SHAKE.mag });
+      const worlds = root.BBWorlds;
+      info = worlds ? worlds.infoFor(game.wave) : null;
+      const cardText = worlds && worlds.titleCard(prev.wave, game.wave);
+      if (cardText) card = { text: cardText, life: CARD_TIME };
+      prev = { drones: game.drones.slice(), lives: game.lives, wave: game.wave, nukes: game.nukes || 0 };
       flash.time = Math.max(0, flash.time - dt);
       shake.time = Math.max(0, shake.time - dt);
+      if (card) { card.life -= dt; if (card.life <= 0) card = null; }
       for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
       for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
       for (const r of rings) r.life -= dt;
@@ -149,15 +162,95 @@
       NEBULA.forEach((n, i) => {
         const x = n.x * W + Math.sin(scroll * 0.15 + i * 2) * 40;
         const y = ((n.y * H + scroll * n.v) % (H + 2 * n.r)) - n.r;
+        const tone = (a) => (info ? "hsla(" + root.BBWorlds.cloudColor(info, i) + "," + a + ")" : "rgba(" + n.c + "," + a + ")");
         const g = ctx.createRadialGradient(x, y, 0, x, y, n.r);
         if (g && typeof g.addColorStop === "function") {
-          g.addColorStop(0, "rgba(" + n.c + ",0.42)");
-          g.addColorStop(1, "rgba(" + n.c + ",0)");
+          g.addColorStop(0, tone(0.42));
+          g.addColorStop(1, tone(0));
           ctx.fillStyle = g;
           ctx.fillRect(x - n.r, y - n.r, n.r * 2, n.r * 2);
-        } else circle(x, y, n.r * 0.7, "rgba(" + n.c + ",0.18)");
+        } else circle(x, y, n.r * 0.7, tone(0.18));
       });
       ctx.restore();
+    }
+
+    // a soft glow: a radial gradient, or a flat disc when gradients are missing
+    function glow(x, y, r, rgb, alpha) {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      if (g && typeof g.addColorStop === "function") {
+        g.addColorStop(0, "rgba(" + rgb + "," + alpha + ")");
+        g.addColorStop(1, "rgba(" + rgb + ",0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      } else circle(x, y, r * 0.6, "rgba(" + rgb + "," + alpha * 0.5 + ")");
+    }
+    const drift = (speed, span) => (scroll * speed) % span;
+    const BLACK_HOLE = { x: W * 0.72, y: H * 0.3, r: 34, lens: 170 };
+
+    // each world's big feature, drawn behind the stars
+    function drawFeature() {
+      const kind = info.feature;
+      ctx.save();
+      if (kind === "ice") { // pale ice asteroids tumbling past
+        for (let i = 0; i < 7; i++) {
+          const x = frac(i + 2, 173) * W, y = (frac(i + 5, 89) * H + drift(14 + i * 3, H + 160)) % (H + 160) - 80, r = 18 + (i % 4) * 9;
+          ctx.fillStyle = "rgba(" + STAGE_COLOR.ice + ",0.28)";
+          ctx.strokeStyle = "rgba(255,255,255,0.5)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2 + i, rr = r * (0.75 + 0.25 * ((k * 5 + i) % 3) / 2);
+            if (k) ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); else ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+          }
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      } else if (kind === "sun") { // a red giant on the horizon with an orange haze above it
+        glow(W / 2, H + 40, 420, "255,110,30", 0.4);
+        glow(W / 2, H + 60, 230, "255,50,20", 0.85);
+        circle(W / 2, H + 70, 170, "rgba(210,40,20,0.9)");
+      } else if (kind === "crystals") { // green and cyan crystal shards
+        for (let i = 0; i < 9; i++) {
+          const x = frac(i + 1, 151) * W, y = (frac(i + 4, 67) * H + drift(10 + i * 2, H + 120)) % (H + 120) - 60, s = 14 + (i % 3) * 10;
+          const hue = i % 2 ? "70,255,170" : "70,220,255";
+          ctx.fillStyle = "rgba(" + hue + ",0.3)";
+          ctx.strokeStyle = "rgba(" + hue + ",0.8)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(x, y - s * 1.6); ctx.lineTo(x + s * 0.6, y); ctx.lineTo(x, y + s * 1.6); ctx.lineTo(x - s * 0.6, y);
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      } else if (kind === "blackhole") { // a black hole with an accretion ring
+        const b = BLACK_HOLE;
+        glow(b.x, b.y, 120, "255,150,60", 0.3);
+        for (let k = 0; k < 4; k++) {
+          ctx.strokeStyle = "rgba(255," + (190 - k * 35) + "," + (90 - k * 15) + "," + (0.8 - k * 0.15) + ")";
+          ctx.lineWidth = 5 - k;
+          ctx.beginPath();
+          ctx.ellipse(b.x, b.y, b.r * (1.9 + k * 0.45), b.r * (0.55 + k * 0.12), -0.35, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        circle(b.x, b.y, b.r, "#000");
+      }
+      ctx.restore();
+    }
+
+    // new layers of distant objects: one more every 10 waves of the world
+    function drawDistant() {
+      for (let layer = 0; layer < info.layers; layer++) {
+        for (let i = 0; i < 3; i++) {
+          const x = frac(layer * 3 + i + 1, 193) * W, y = (frac(layer * 3 + i + 7, 59) * H + drift(3 + layer, H + 20)) % (H + 20);
+          circle(x, y, 1.5 + ((layer + i) % 3), "hsla(" + root.BBWorlds.cloudColor(info, layer + i) + ",0.55)");
+        }
+      }
+    }
+
+    // where a star shows up: near the black hole the light bends outward around it
+    function bent(x, y) {
+      if (!info || info.feature !== "blackhole") return [x, y];
+      const b = BLACK_HOLE, dx = x - b.x, dy = y - b.y, d = Math.hypot(dx, dy);
+      if (d >= b.lens || d < 1) return [x, y];
+      const f = 1 + (1 - d / b.lens) * 0.9;
+      return [b.x + dx * f, b.y + dy * f];
     }
 
     function drawShockwaves() {
@@ -190,15 +283,16 @@
       ctx.restore();
     }
     function drawBackground() {
-      ctx.fillStyle = "#050514";
+      ctx.fillStyle = info ? info.sky : "#050514";
       ctx.fillRect(0, 0, W, H);
       drawNebula();
+      if (info) { drawFeature(); drawDistant(); }
       stars.forEach((layer, li) => {
         const L = STAR_LAYERS[li];
         for (const s of layer) {
-          const y = (s.y + scroll * L.speed) % H;
-          if (L.sprite) sprite(L.sprite, s.x, y, L.size, () => { ctx.fillStyle = "#fff"; ctx.fillRect(s.x, y, 3, 3); });
-          else { ctx.fillStyle = li ? "#cde" : "#789"; ctx.fillRect(s.x, y, L.size, L.size); }
+          const [x, y] = bent(s.x, (s.y + scroll * L.speed) % H);
+          if (L.sprite) sprite(L.sprite, x, y, L.size, () => { ctx.fillStyle = "#fff"; ctx.fillRect(x, y, 3, 3); });
+          else { ctx.fillStyle = li ? "#cde" : "#789"; ctx.fillRect(x, y, L.size, L.size); }
         }
       });
       ctx.globalAlpha = 0.55;
@@ -213,10 +307,20 @@
       const [cx, cy] = center(e);
       const w = e.w * (e.boss ? 1.1 : SPRITE_SCALE);
       const color = SPECIES_COLOR[e.species] || SPECIES_COLOR.drone;
+      const tinted = info && (info.world > 1 || info.loop > 0);
+      if (tinted) { // each world tints its enemies: a halo everywhere, a hue shift where the canvas has filters
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        glow(cx, cy, w * 0.9, info.tint.halo, 0.3);
+        ctx.restore();
+        ctx.save();
+        if (typeof ctx.filter === "string") ctx.filter = "hue-rotate(" + (info.tint.hue + 25 * info.loop) + "deg)";
+      }
       sprite(e.species || "drone", cx, cy, w, () => {
         ctx.fillStyle = color;
         ctx.fillRect(e.x + 2, e.y + 2, e.w - 4, e.h - 4);
       });
+      if (tinted) ctx.restore();
     }
 
     // MASTERED projectiles glow gold, ULTRA-MAD ones red-hot; ULTRA-MAD faster shots leave a trail
@@ -389,6 +493,72 @@
     function drawEscort(e) {
       const [cx, cy] = center(e);
       sprite("escort", cx, cy, e.w * 1.5, () => { ctx.fillStyle = "#8ff"; ctx.fillRect(e.x + 3, e.y, e.w - 6, e.h); });
+    }
+
+    // the Kaboom missile, drawn in code: grey body, red nose, fins, a flame and a smoke trail behind it
+    function drawMissile(m, t) {
+      const angle = Math.atan2(m.ty - m.sy, m.tx - m.sx) + Math.PI / 2;
+      for (let i = 1; i <= 12; i++) { // smoke puffs, older ones bigger and fainter
+        const k = Math.max(0, m.t / m.dur - i * 0.04), px = m.sx + (m.tx - m.sx) * k, py = m.sy + (m.ty - m.sy) * k;
+        circle(px, py, 2 + i * 0.7, "rgba(200,200,210," + (0.5 - i * 0.04) + ")");
+      }
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(angle);
+      ctx.fillStyle = "rgba(255,170,60,0.9)"; // flame
+      ctx.beginPath(); ctx.moveTo(-3, 9); ctx.lineTo(0, 17 + 5 * Math.sin(t * 60)); ctx.lineTo(3, 9); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#c9ced8"; ctx.fillRect(-3, -8, 6, 17); // body
+      ctx.fillStyle = "#e33"; // nose
+      ctx.beginPath(); ctx.moveTo(-3, -8); ctx.lineTo(0, -15); ctx.lineTo(3, -8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#8a93a6"; // fins
+      ctx.beginPath(); ctx.moveTo(-3, 4); ctx.lineTo(-7, 11); ctx.lineTo(-3, 9); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(3, 4); ctx.lineTo(7, 11); ctx.lineTo(3, 9); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    // the nuke: fireball, shockwave ring (0 to the blast radius over its time), rising mushroom cloud and debris
+    function drawNuke(nuke) {
+      const k = Math.min(1, nuke.t / nuke.dur), fade = 1 - k;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      glow(nuke.x, nuke.y, nuke.radius * (0.35 + 0.45 * k), "255,170,60", 0.9 * fade + 0.1);
+      glow(nuke.x, nuke.y, nuke.radius * 0.3 * (1 - k * 0.5), "255,255,220", 0.9 * fade);
+      ctx.globalAlpha = Math.max(0, fade);
+      circle(nuke.x, nuke.y, nuke.radius * k, null, "#fff", 4 * fade + 1); // shockwave
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - k * 0.7);
+      const capY = nuke.y - 20 - 70 * k, capR = 26 + 34 * k; // mushroom cloud: a stem and a cap that rise
+      ctx.fillStyle = "rgba(120,80,60,0.85)";
+      ctx.fillRect(nuke.x - 8 - 6 * k, capY, 16 + 12 * k, nuke.y - capY + 6);
+      circle(nuke.x, capY, capR, "rgba(255,140,50,0.8)");
+      circle(nuke.x - capR * 0.5, capY + capR * 0.35, capR * 0.55, "rgba(190,90,40,0.8)");
+      circle(nuke.x + capR * 0.5, capY + capR * 0.35, capR * 0.55, "rgba(190,90,40,0.8)");
+      for (let i = 0; i < 14; i++) { // debris
+        const a = (i / 14) * Math.PI * 2 + i * 0.4, d = nuke.radius * k * (0.5 + ((i * 7) % 5) / 8);
+        ctx.fillStyle = i % 2 ? "#fc6" : "#a64";
+        ctx.fillRect(nuke.x + Math.cos(a) * d - 2, nuke.y + Math.sin(a) * d + 60 * k * k - 2, 4, 4); // debris falls a little
+      }
+      ctx.restore();
+    }
+
+    // the white flash of the blast (dimmed with reduced motion)
+    function drawNukeFlash(nuke) {
+      const life = nuke.t / NUKE_FLASH.time;
+      if (life >= 1) return;
+      ctx.fillStyle = "rgba(255,255,255," + (0.9 * (1 - life) * (reducedMotion ? NUKE_FLASH.dimmed : 1)) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // "WORLD 2: FROST BELT" fading in and out
+    function drawCard() {
+      const age = CARD_TIME - card.life, alpha = Math.max(0, Math.min(1, age / 0.4, card.life / 0.6));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "rgba(0,0,10,0.55)";
+      ctx.fillRect(0, 232, W, 70);
+      text(card.text, W / 2, 278, 26, "#fff", "center");
+      ctx.restore();
     }
 
     function drawParticles() {
@@ -686,9 +856,9 @@
       ui.panel(40, 90, W - 80, 440, { stroke: N.cyan });
       ui.title("HOW TO PLAY", W / 2, 140, 28);
       (menu && menu.keys ? howToRows(menu.keys) : HOW_TO_ROWS).forEach((row, i) => {
-        const y = 195 + i * 40;
+        const y = 195 + i * 36;
         ui.icon(row.icon, 76, y - 5, 24, N.cyan);
-        text(row.text, 98, y, 14, "#fff");
+        text(row.text, 98, y, 13, "#fff");
       });
       text("Press Enter, P or tap to continue", W / 2, 500, 14, N.yellow, "center");
     }
@@ -702,7 +872,8 @@
       ui.title("RESULTS", W / 2, 70, 32, N.red);
       ui.stars(W / 2, 100, res.stars, 3, 13);
       text("SCORE " + res.score, W / 2, 145, 22, "#fff", "center");
-      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 170, 14, N.yellow, "center");
+      if (res.line) text(res.line, W / 2, 168, 16, N.cyan, "center"); // "12,400 / 15,000 — 83 %"
+      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 188, 13, N.yellow, "center");
       res.goals.forEach((g, i) => {
         const y = 205 + i * 24;
         ui.icon(GOAL_ICON[g.id] || "star", 100, y - 5, 18, g.done ? "#ffd23c" : "rgba(255,255,255,0.3)");
@@ -719,8 +890,8 @@
       const game = view.game, t = view.time || 0;
       ctx.save();
       if (shake.time > 0) { // wobble that fades out
-        const k = shake.time / SHAKE.time;
-        ctx.translate(Math.sin(shake.time * 90) * SHAKE.mag * k, Math.cos(shake.time * 70) * SHAKE.mag * k);
+        const k = shake.time / shake.max;
+        ctx.translate(Math.sin(shake.time * 90) * shake.mag * k, Math.cos(shake.time * 70) * shake.mag * k);
       }
       drawBackground();
       for (const d of game.drones) drawEnemy(d);
@@ -732,7 +903,9 @@
       drawShip(game, t);
       drawTwin(game, t);
       drawMoons(game, t);
+      for (const m of game.missiles || []) drawMissile(m, t);
       drawShockwaves();
+      if (game.nuke) drawNuke(game.nuke);
       drawParticles();
       for (const p of game.pops || []) { // ULTRA-MAD Score per hit: red floating points
         ctx.globalAlpha = Math.max(0, p.life / p.max);
@@ -743,9 +916,11 @@
         ctx.fillStyle = "rgba(255,60,60," + (0.4 * flash.time / FLASH_TIME) + ")";
         ctx.fillRect(0, 0, W, H);
       }
+      if (game.nuke) drawNukeFlash(game.nuke);
       ctx.restore();
       drawHud(view);
       drawControls(view);
+      if (card && game.status === "playing") drawCard();
       if (game.picker && game.status === "playing") drawPicker(game, t);
       const screen = view.menu && view.menu.screen;
       if (screen === "initials") drawInitials(view);

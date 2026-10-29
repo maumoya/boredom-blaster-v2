@@ -10,7 +10,7 @@
   const DRONE = { w: 28, h: 20, gapX: 44, gapY: 36, points: 10 };
   const SHIP_MIN_Y = HUD_H; // the ship goes anywhere below the top bar
   const SPECIAL = { w: 40, h: 16, speed: 420, cooldown: 6 };
-  const KABOOM = { killsPerCharge: 10, maxCharges: 3, targets: 5 };
+  const KABOOM = { killsPerCharge: 10, maxCharges: 3, flight: 0.5, radius: 220, blast: 0.6 }; // missile flight, blast radius (px) and blast growth, in seconds
   const START_LIVES = 3;
   const MAX_LIVES = 9;
   const INVULN = 1.5;
@@ -34,13 +34,14 @@
     const script = E().waveScript(game.wave);
     const { cols, rows } = script.drones;
     const left = (W - (cols - 1) * DRONE.gapX - DRONE.w) / 2;
-    game.drones = [];
+    const spawned = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        game.drones.push(E().createEnemy(game, "drone", left + c * DRONE.gapX, HUD_H + 10 + r * DRONE.gapY));
+        spawned.push(E().createEnemy(game, "drone", left + c * DRONE.gapX, HUD_H + 10 + r * DRONE.gapY));
       }
     }
-    game.drones.push(...E().spawnEnemies(game, script));
+    spawned.push(...E().spawnEnemies(game, script));
+    game.drones = register(game, spawned);
     game.dir = 1;
     regrowMoons(game); // broken moons grow back at the next wave
   }
@@ -141,9 +142,9 @@
       w: W, h: H,
       ship: { x: (W - SHIP.w) / 2, y: SHIP.y, w: SHIP.w, h: SHIP.h },
       bullets: [], drones: [], enemyBullets: [],
-      score: 0, lives: START_LIVES, wave: 1,
+      score: 0, maxScore: 0, lives: START_LIVES, wave: opts && opts.wave > 1 ? Math.floor(opts.wave) : 1, // opts.wave: the ?wave=N debug start
       cooldown: 0, invuln: 0, dir: 1,
-      specialCooldown: 0, laserCooldown: 0, laserBeam: null, moonAngle: 0, moons: [], twinFlash: null, kills: 0, kaboomCharges: 0, paused: false,
+      specialCooldown: 0, laserCooldown: 0, laserBeam: null, moonAngle: 0, moons: [], twinFlash: null, kills: 0, kaboomCharges: 0, missiles: [], nuke: null, nukes: 0, paused: false,
       status: "playing", // "playing" | "over"
     };
     if (opts && opts.rng) game.rng = opts.rng;
@@ -189,11 +190,20 @@
   const isFormation = (e) => !e.pattern || e.pattern === "formation";
   const pointsOf =(e) => e.points || DRONE.points;
 
+  // the points one enemy pays now, with Score per hit
+  const worthOf = (game, e) => Math.round(pointsOf(e) * K().scoreMult(K().tier(game, "score")));
+  // every spawned enemy adds its points (at the current multiplier) to the maximum possible score
+  function register(game, list) {
+    for (const e of list) { e.worth = worthOf(game, e); game.maxScore += e.worth; }
+    return list;
+  }
+
   // points for one enemy, with Score per hit; ULTRA-MAD also floats red points
   function award(game, e) {
     const tier = K().tier(game, "score");
-    const pts = Math.round(pointsOf(e) * K().scoreMult(tier));
+    const pts = worthOf(game, e);
     game.score += pts;
+    if (pts > (e.worth || 0)) { game.maxScore += pts - (e.worth || 0); e.worth = pts; } // the multiplier rose after it spawned
     if (tier < K().ULTRA) return;
     game.pops = (game.pops || []).slice(-19);
     game.pops.push({ x: e.x + e.w / 2, y: e.y, text: "+" + pts, life: 0.8, max: 0.8 });
@@ -215,23 +225,59 @@
     if (byKaboom) award(game, e);
     else addKill(game, e);
     if (e.boss) R().onMiniBossKill(game, e.x + e.w / 2, e.y + e.h);
-    if (!byKaboom) game.drones.push(...E().splitChildren(game, e));
+    if (!byKaboom) game.drones.push(...register(game, E().splitChildren(game, e)));
   }
 
   function hurt(game, e, amount, byKaboom) {
     if (!e.dead && E().damage(e, amount)) destroy(game, e, byKaboom);
   }
 
-  // Kaboom: spend a charge to destroy the 5 drones nearest the ship (scored, but they do not recharge it).
+  // ---- Kaboom: a missile flies to the densest group, then a nuke blast clears everything inside it ----
+  const centerOf = (e) => ({ x: e.x + e.w / 2, y: e.y + e.h / 2 });
+
+  // the middle of the biggest cluster (enemies within the blast radius of one another; ties: nearest the ship);
+  // with no enemies the missile flies straight up
+  function densestPoint(game) {
+    const ship = centerOf(game.ship), live = game.drones.filter((d) => !d.dead).map(centerOf);
+    let best = null;
+    for (const c of live) {
+      const group = live.filter((o) => Math.hypot(o.x - c.x, o.y - c.y) <= KABOOM.radius);
+      const x = group.reduce((a, o) => a + o.x, 0) / group.length, y = group.reduce((a, o) => a + o.y, 0) / group.length;
+      const d = Math.hypot(x - ship.x, y - ship.y);
+      if (!best || group.length > best.n || (group.length === best.n && d < best.d)) best = { n: group.length, x, y, d };
+    }
+    return best ? { x: best.x, y: best.y } : { x: ship.x, y: HUD_H + 100 };
+  }
+
+  // Spends a charge and launches the missile (its kills are scored, but they do not recharge Kaboom).
   function kaboom(game) {
     if (game.status !== "playing" || game.paused || game.kaboomCharges <= 0) return false;
-    const cx = game.ship.x + game.ship.w / 2, cy = game.ship.y + game.ship.h / 2;
-    const dist = (d) => Math.hypot(d.x + d.w / 2 - cx, d.y + d.h / 2 - cy);
-    const doomed = new Set([...game.drones].sort((a, b) => dist(a) - dist(b)).slice(0, KABOOM.targets));
-    for (const d of doomed) hurt(game, d, d.boss ? KABOOM_BOSS_DAMAGE : Infinity, true);
-    game.drones = game.drones.filter((d) => !d.dead);
+    const from = { x: game.ship.x + game.ship.w / 2, y: game.ship.y }, to = densestPoint(game);
+    game.missiles.push({ sx: from.x, sy: from.y, x: from.x, y: from.y, tx: to.x, ty: to.y, t: 0, dur: KABOOM.flight });
     game.kaboomCharges -= 1;
     return true;
+  }
+
+  // the nuke: enemies and enemy bullets whose centre is inside the radius die; bosses take 10 damage
+  function detonate(game, m) {
+    const inside = (e) => { const c = centerOf(e); return Math.hypot(c.x - m.tx, c.y - m.ty) <= KABOOM.radius; };
+    for (const d of game.drones) if (!d.dead && inside(d)) hurt(game, d, d.boss ? KABOOM_BOSS_DAMAGE : Infinity, true);
+    game.drones = game.drones.filter((d) => !d.dead);
+    game.enemyBullets = game.enemyBullets.filter((b) => !inside(b));
+    game.nuke = { x: m.tx, y: m.ty, t: 0, dur: KABOOM.blast, radius: KABOOM.radius };
+    game.nukes += 1;
+  }
+
+  function stepMissiles(game, dt) {
+    if (game.nuke) { game.nuke.t += dt; if (game.nuke.t >= game.nuke.dur) game.nuke = null; }
+    const flying = [];
+    for (const m of game.missiles) {
+      m.t += dt;
+      const k = Math.min(1, m.t / m.dur);
+      m.x = m.sx + (m.tx - m.sx) * k; m.y = m.sy + (m.ty - m.sy) * k;
+      if (k >= 1) detonate(game, m); else flying.push(m);
+    }
+    game.missiles = flying;
   }
 
   function addLife(game) {
@@ -350,6 +396,7 @@
     game.bullets = game.bullets.filter((b) => !b.dead);
     stepLaser(game, dt);
     stepMoons(game, dt);
+    stepMissiles(game, dt);
     game.drones = game.drones.filter((d) => !d.dead);
 
     // the twin takes the first hit (a shot or a touch) and leaves
@@ -390,11 +437,11 @@
     }
   }
 
-  function restart() {
-    return createGame();
+  function restart(opts) {
+    return createGame(opts);
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, laser, twin, twinRect, laserColumns, moonPos, LASER, MOON, BEND, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, centerOf, densestPoint, special, laser, twin, twinRect, laserColumns, moonPos, LASER, MOON, BEND, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.
