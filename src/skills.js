@@ -94,10 +94,10 @@
     return true;
   }
 
-  // Losing a life drops the most recently upgraded family one tier, unless it is MASTERED or ULTRA-MAD.
+  // An unabsorbed hit drops the most recently upgraded family one tier (MASTERED and ULTRA-MAD included).
   function onLifeLost(game) {
     const id = game.skillHistory[game.skillHistory.length - 1];
-    if (!id || tier(game, id) >= MASTERED) return false;
+    if (!id) return false;
     const next = Math.max(family(id).base, tier(game, id) - 1);
     game.skills[id] = next;
     if (next <= family(id).base) game.skillHistory.pop();
@@ -106,12 +106,23 @@
 
   // ---- capsules and the picker ----
   const PICKS = { bronze: 1, silver: 1, gold: 2 };
+  const OFFER_ODDS = { [MASTERED]: 0.5, [ULTRA]: 0.25 }; // chance a choice that reaches this tier is offered
+  // Families the picker may offer now: a step to MASTERED or ULTRA-MAD must win its roll on game.rng.
+  function rollOffers(game) {
+    const rng = game.rng || Math.random;
+    return available(game).filter((f) => {
+      const odds = OFFER_ODDS[tier(game, f.id) + 1];
+      return odds === undefined || rng() < odds;
+    }).map((f) => f.id);
+  }
   // Gives picks for a capsule rank; when everything is ULTRA-MAD the capsule is worth points instead.
   // Returns "points" | "picker" | false (rank is not a skill capsule).
   function addPicks(game, n) {
-    if (allUltra(game)) { game.score += ULTRA_BONUS_POINTS; return "points"; }
+    if (game.picker) { game.picks += n; return "picker"; }
+    const offered = rollOffers(game);
+    if (!offered.length) { game.score += ULTRA_BONUS_POINTS; return "points"; }
     game.picks += n;
-    if (!game.picker) openPicker(game);
+    openPicker(game, offered);
     return "picker";
   }
   function capsule(game, rank) {
@@ -120,10 +131,10 @@
     return addPicks(game, PICKS[rank]);
   }
 
-  function openPicker(game) {
-    const free = available(game);
-    if (game.picks <= 0 || !free.length) { game.picks = 0; game.picker = null; return null; }
-    game.picker = { cursor: IDS.indexOf(free[0].id) };
+  function openPicker(game, offered) {
+    const free = game.picks > 0 ? (offered || rollOffers(game)) : [];
+    if (!free.length) { game.picks = 0; game.picker = null; return null; }
+    game.picker = { cursor: IDS.indexOf(free[0]), offered: free };
     root.BBSkills.picker = game.picker;
     root.BBSkills.game = game;
     return game.picker;
@@ -134,7 +145,7 @@
   }
   // Picks family `id` (needs the picker open); reopens for the next pick, if any.
   function choose(game, id) {
-    if (!game.picker || !family(id) || tier(game, id) >= MAX_TIER) return false;
+    if (!game.picker || !family(id) || tier(game, id) >= MAX_TIER || !game.picker.offered.includes(id)) return false;
     upgrade(game, id);
     game.picks -= 1;
     closePicker(game);
@@ -146,7 +157,7 @@
     if (!p) return false;
     for (let i = 1; i <= IDS.length; i++) {
       const j = (p.cursor + dir * i + IDS.length * 8) % IDS.length;
-      if (tier(game, IDS[j]) < MAX_TIER) { p.cursor = j; return true; }
+      if (p.offered.includes(IDS[j])) { p.cursor = j; return true; }
     }
     return false;
   }

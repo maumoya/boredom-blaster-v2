@@ -3,7 +3,7 @@
 // globalThis.BBRewards. All state lives on the game object, randomness comes from game.rng.
 (function (root) {
   const WEAPON = { maxLevel: 5, spread: 14 }; // spread: horizontal px between shots
-  const CAPSULE = { w: 28, h: 16, speed: 90, everyKills: 12 };
+  const CAPSULE = { w: 28, h: 16, speed: 90, everyKills: 12, dropChance: 0.3 };
   const RANKS = ["bronze", "silver", "gold", "rainbow", "heart"];
   // chance of each rank when a capsule is rolled (sums to 1)
   const RANK_ODDS = { bronze: 0.52, silver: 0.23, gold: 0.14, rainbow: 0.03, heart: 0.08 };
@@ -52,13 +52,14 @@
     return c;
   }
 
-  // Every 12th kill drops a rolled capsule where the drone died.
+  // Every 12th kill drops a rolled capsule where the drone died, after a 30 % roll.
   function onKill(game, x, y) {
-    if (game.kills % CAPSULE.everyKills === 0) spawnCapsule(game, x, y);
+    if (game.kills % CAPSULE.everyKills === 0 && game.rng() < CAPSULE.dropChance) spawnCapsule(game, x, y);
   }
 
-  // Every mini-boss always drops a capsule.
+  // Every mini-boss drops a capsule after the same 30 % roll.
   function onMiniBossKill(game, x, y) {
+    if (!(game.rng() < CAPSULE.dropChance)) return null;
     return spawnCapsule(game, x, y);
   }
 
@@ -122,7 +123,7 @@
     placeEscorts(game);
   }
 
-  // Losing a life drops the most recently upgraded skill family one tier (not MASTERED or ULTRA-MAD).
+  // Losing a life drops the most recently upgraded skill family one tier (MASTERED and ULTRA-MAD too).
   function onLifeLost(game) {
     root.BBSkills.onLifeLost(game);
   }
