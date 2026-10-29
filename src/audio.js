@@ -41,11 +41,38 @@
     F: [7, 7, null, 9, 7, null, 11, 9],
     G: [11, 11, 13, 11, 9, 9, 7, 7],
   };
+  // step = one eighth note in seconds
+  const BOSS_SPEC = { step: 0.095, root: 45, mode: "minor", lead: "triangle", bassWave: "triangle", bassEvery: 1, chords: [0, 5, 2, 6], form: "EFEGEFGEEFEGCGEE" };
   const THEME_SPECS = {
     title: { step: 0.17, root: 57, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 2, chords: [0, 5, 3, 4], form: "ABACABCDABACBBCD" },
     play: { step: 0.115, root: 52, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 1, chords: [0, 4, 5, 3], form: "FGFEFGCEFGFEBGDE" },
-    boss: { step: 0.095, root: 45, mode: "minor", lead: "triangle", bassWave: "triangle", bassEvery: 1, chords: [0, 5, 2, 6], form: "EFEGEFGEEFEGCGEE" },
+    boss: BOSS_SPEC,
   };
+  // the five theme songs of Settings > Sound: Nebula is the original; the boss theme is the same in all of them
+  const SONG_SPECS = {
+    Nebula: THEME_SPECS,
+    Starlight: { // slow and airy, major, about 84 bpm
+      title: { step: 0.357, root: 60, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 4, chords: [0, 2, 3, 4], form: "DADBDACBDADBCBAD" },
+      play: { step: 0.357, root: 55, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 4, chords: [0, 3, 4, 5], form: "BADCBAEDBADCABDD" },
+      boss: BOSS_SPEC,
+    },
+    Pulse: { // driving bass, about 128 bpm
+      title: { step: 0.234, root: 55, mode: "minor", lead: "triangle", bassWave: "square", bassEvery: 1, chords: [0, 5, 3, 4], form: "FGFEFGFEFGFEBGCE" },
+      play: { step: 0.234, root: 50, mode: "minor", lead: "triangle", bassWave: "square", bassEvery: 1, chords: [0, 2, 5, 6], form: "GFGEGFCEGFGEBFDE" },
+      boss: BOSS_SPEC,
+    },
+    Drift: { // calm, minor, about 72 bpm
+      title: { step: 0.417, root: 57, mode: "minor", lead: "triangle", bassWave: "triangle", bassEvery: 4, chords: [0, 5, 2, 6], form: "ADBDACDBADBDCBDD" },
+      play: { step: 0.417, root: 52, mode: "minor", lead: "triangle", bassWave: "triangle", bassEvery: 2, chords: [0, 3, 5, 4], form: "DBADCBDADBADCADD" },
+      boss: BOSS_SPEC,
+    },
+    Overdrive: { // fast, about 150 bpm
+      title: { step: 0.2, root: 59, mode: "major", lead: "triangle", bassWave: "square", bassEvery: 1, chords: [0, 4, 5, 3], form: "EFEGEFGEEFEGCGEE" },
+      play: { step: 0.2, root: 53, mode: "major", lead: "triangle", bassWave: "square", bassEvery: 1, chords: [0, 5, 3, 4], form: "EGEFEGCEEGEFBGEE" },
+      boss: BOSS_SPEC,
+    },
+  };
+  const SONG_NAMES = Object.keys(SONG_SPECS), DEFAULT_SONG = "Nebula";
   const degreeNote = (scale, d) => scale[d % 7] + 12 * Math.floor(d / 7);
   function buildTheme(spec) {
     const scale = SCALES[spec.mode], bars = [];
@@ -64,6 +91,12 @@
   }
   const THEMES = {};
   for (const k of Object.keys(THEME_SPECS)) THEMES[k] = buildTheme(THEME_SPECS[k]);
+  // every song's title / play / boss loops; THEMES (above) stays Nebula's
+  const SONG_THEMES = {};
+  for (const song of SONG_NAMES) {
+    SONG_THEMES[song] = {};
+    for (const k of Object.keys(THEME_SPECS)) SONG_THEMES[song][k] = song === DEFAULT_SONG || k === "boss" ? THEMES[k] : buildTheme(SONG_SPECS[song][k]);
+  }
   // each of the five worlds (100 waves) lifts the whole play loop by these semitones; after world 5 the worlds repeat
   const WORLD_SHIFT = [0, 2, 4, -3, 5, 7, -1, 3];
   const WAVES_PER_WORLD = 100, WORLD_COUNT = 5;
@@ -101,6 +134,7 @@
       musicVolume: keep && Number.isFinite(stored.musicVolume) ? clampVolume(stored.musicVolume) : VOLUME_DEFAULTS.musicVolume,
       effectsVolume: keep && Number.isFinite(stored.effectsVolume) ? clampVolume(stored.effectsVolume) : VOLUME_DEFAULTS.effectsVolume,
     };
+    let song = SONG_NAMES.includes(stored.theme) ? stored.theme : DEFAULT_SONG; // bb.settings.theme
     const on = (name) => (settings ? settings.get(name) : true);
     let ctx = null, master = null, musicGain = null, sfxGain = null, sfxFilter = null, leadFilter = null, failed = false;
     let voices = []; // end times of the effects still sounding
@@ -109,7 +143,7 @@
     // the settings object only saves its own switches: write them together with the volumes
     function persist() {
       if (!storage) return;
-      try { storage.setItem("bb.settings", JSON.stringify({ ...(settings ? settings.all() : {}), ...vol, volumesV: VOLUMES_V })); } catch (e) { /* blocked */ }
+      try { storage.setItem("bb.settings", JSON.stringify({ ...(settings ? settings.all() : {}), ...vol, volumesV: VOLUMES_V, theme: song })); } catch (e) { /* blocked */ }
     }
     if (!keep && Object.keys(stored).length) persist();
     if (settings && typeof settings.set === "function") {
@@ -193,7 +227,7 @@
       if (!ctx || !on("music") || vol.musicVolume === 0) return 0;
       let n = 0;
       try {
-        const now = ctx.currentTime || 0, theme = THEMES[music.theme], shift = transposeFor(music.world);
+        const now = ctx.currentTime || 0, theme = SONG_THEMES[song][music.theme], shift = transposeFor(music.world);
         if (!music.playing || music.next < now) { music.next = now + 0.05; music.playing = true; }
         while (music.next < now + 0.25) {
           const bar = theme.bars[music.bar], t = music.next, len = theme.step;
@@ -208,7 +242,17 @@
       return n;
     }
 
-    // ---- settings: volumes, presets ----
+    // ---- settings: theme song, volumes, presets ----
+    // picks a song and saves it; a change (not quiet) restarts the loop from bar 1, which is the short preview
+    function setSong(name, quiet) {
+      if (!SONG_NAMES.includes(name)) return false;
+      const changed = name !== song;
+      song = name;
+      persist();
+      if (changed) { music.bar = 0; music.step = 0; music.next = 0; music.playing = false; if (!quiet) tick(); }
+      return true;
+    }
+    const nextSong = () => setSong(SONG_NAMES[(SONG_NAMES.indexOf(song) + 1) % SONG_NAMES.length]);
     function setVolume(kind, value) {
       const key = kind === "music" ? "musicVolume" : kind === "effects" ? "effectsVolume" : null;
       if (!key) return false;
@@ -274,7 +318,7 @@
     }
 
     return {
-      unlock, play, tick, setTheme, observe, refresh, setVolume, stepVolume, volume, applyPreset, nextPreset, preset, muted, toggleMute,
+      unlock, play, tick, setTheme, setSong, nextSong, song: () => song, observe, refresh, setVolume, stepVolume, volume, applyPreset, nextPreset, preset, muted, toggleMute,
       get started() { return !!ctx; },
       get theme() { return music.theme; },
       get world() { return music.world; },
@@ -333,7 +377,7 @@
   const speakerHit = (x, y) => Math.hypot(x - SPEAKER.x, y - SPEAKER.y) <= SPEAKER.r + 4;
 
   root.BBAudio = {
-    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, NUKE_SHAKE_MS, NUKE_VIBRATE, WORLD_COUNT, SOUNDS, SOUND_IDS, THEMES, MOTIFS, SCALES, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
+    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, NUKE_SHAKE_MS, NUKE_VIBRATE, WORLD_COUNT, SOUNDS, SOUND_IDS, THEMES, SONG_THEMES, SONG_NAMES, DEFAULT_SONG, MOTIFS, SCALES, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
     worldOf, transposeFor, midiHz, createAudio, createHaptics,
   };
 })(globalThis);

@@ -48,16 +48,18 @@
       sounds,
       { type: "volume", kind: "effects", label: "Effects volume", value: audio.volume("effects") + "%" },
       { type: "preset", label: "Sound preset", value: audio.preset() },
+      { type: "song", label: "Theme song", value: audio.song() },
       vibration, back];
   };
-  menu.onResetAll = () => { audio.setVolume("music", 50); audio.setVolume("effects", 50); };
+  menu.onResetAll = () => { audio.setVolume("music", 50); audio.setVolume("effects", 50); audio.setSong(BBAudio.DEFAULT_SONG, true); };
   const baseActivate = menu.activate;
   menu.activate = (index) => {
     if (menu.screen !== "settings") return baseActivate(index);
     const i = index === undefined ? menu.cursor : index, row = menu.settingsRows()[i];
-    if (!row || (row.type !== "volume" && row.type !== "preset")) return baseActivate(index);
+    if (!row || (row.type !== "volume" && row.type !== "preset" && row.type !== "song")) return baseActivate(index);
     menu.cursor = i;
     if (row.type === "preset") audio.nextPreset();
+    else if (row.type === "song") audio.nextSong();
     else audio.setVolume(row.kind, (audio.volume(row.kind) + BBAudio.STEP) % (100 + BBAudio.STEP)); // Enter cycles 0..100 %
     audio.play("click");
     return "audio";
