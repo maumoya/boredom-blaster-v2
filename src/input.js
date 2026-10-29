@@ -261,6 +261,39 @@
     return m;
   }
 
+  // ---- initials picker for a new record: three letter slots, up/down change a letter, OK confirms ----
+  const INITIALS_LAYOUT = { slotX: [160, 240, 320], slotW: 60, upY: 230, downY: 340, boxH: 40, letterY: 305, ok: { x: 190, y: 410, w: 100, h: 44 } };
+  function createInitialsPicker() {
+    const L = INITIALS_LAYOUT, p = { letters: [0, 0, 0], slot: 0 };
+    p.value = () => p.letters.map((n) => String.fromCharCode(65 + n)).join("");
+    p.up = () => { p.letters[p.slot] = (p.letters[p.slot] + 1) % 26; };
+    p.down = () => { p.letters[p.slot] = (p.letters[p.slot] + 25) % 26; };
+    p.left = () => { p.slot = (p.slot + 2) % 3; };
+    p.right = () => { p.slot = (p.slot + 1) % 3; };
+    // what a point on the canvas hits: { type: "up"|"down"|"slot", slot } | { type: "ok" } | null
+    p.hit = (x, y) => {
+      const o = L.ok;
+      if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return { type: "ok" };
+      for (let i = 0; i < 3; i++) {
+        if (Math.abs(x - L.slotX[i]) > L.slotW / 2) continue;
+        if (y >= L.upY - L.boxH / 2 && y <= L.upY + L.boxH / 2) return { type: "up", slot: i };
+        if (y >= L.downY - L.boxH / 2 && y <= L.downY + L.boxH / 2) return { type: "down", slot: i };
+        if (y > L.upY + L.boxH / 2 && y < L.downY - L.boxH / 2) return { type: "slot", slot: i };
+      }
+      return null;
+    };
+    // applies a touch or click; returns "ok" when OK was hit
+    p.tap = (x, y) => {
+      const h = p.hit(x, y);
+      if (!h) return null;
+      if (h.type === "ok") return "ok";
+      p.slot = h.slot;
+      if (h.type === "up") p.up(); else if (h.type === "down") p.down();
+      return null;
+    };
+    return p;
+  }
+
   // ---- run results: stars and the goals checklist ----
   // 1 star at wave 5, 2 at wave 10, 3 at wave 15, and the third needs a clean boss wave (no life lost on one).
   const STAR_WAVES = [5, 10, 15];
@@ -303,6 +336,6 @@
   root.BBInput = {
     STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, TITLE_ACTIONS, MAX_SCORES,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
-    createStore, createMenu, buttonAt, buttonsFor, mirrorButtons,
+    createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
   };
 })(globalThis);

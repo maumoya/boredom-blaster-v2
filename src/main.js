@@ -10,6 +10,8 @@
   let storage = null;
   try { storage = globalThis.localStorage; } catch (e) { /* blocked: best score just won't persist */ }
   const store = BBInput.createStore(storage);
+  const scoreStore = BBScores.createStore(storage);
+  const HIGHLIGHT_SECONDS = 3; // a new high-score row blinks this long
   const assets = BBAssets.createAssets(() => new Image());
   // reduced motion (the OS setting) turns off pulses, background drift and screen shake
   const motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -21,7 +23,10 @@
 
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
-  let scores = store.loadScores();
+  let scores = scoreStore.load();
+  let highlight = null; // { index, until }: the new row blinks until this time (seconds)
+  let picker = null; // the initials picker while a new record is being entered
+  let runSeconds = 0; // play time of this run, for the score plausibility check
   let stats = BBInput.createRunStats(); // goals and boss-wave lives for the results screen
   let results = null;
   const keyboard = BBInput.createKeyboard();
@@ -33,6 +38,8 @@
     game = BB.restart();
     stats = BBInput.createRunStats();
     results = null;
+    picker = null;
+    runSeconds = 0;
     menu.screen = "playing";
   }
 
@@ -43,7 +50,24 @@
     } else if (action === "restart" || action === "start") restart();
   }
 
+  // Enter or OK in the picker saves the record and shows the results with the new row blinking
+  function confirmInitials() {
+    const r = scoreStore.add({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, date: Date.now() });
+    scores = r.list;
+    highlight = r.index >= 0 ? { index: r.index, until: performance.now() / 1000 + HIGHLIGHT_SECONDS } : null;
+    picker = null;
+    menu.finish();
+  }
+  const PICKER_KEYS = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right" };
+
   addEventListener("keydown", (e) => {
+    if (menu.screen === "initials") {
+      if (e.code === "Enter") confirmInitials();
+      else if (PICKER_KEYS[e.code]) picker[PICKER_KEYS[e.code]]();
+      else return;
+      e.preventDefault();
+      return;
+    }
     if (e.code === "Enter") {
       if (menu.screen !== "playing") { runMenuAction(menu.activate()); e.preventDefault(); return; }
     }
@@ -62,6 +86,7 @@
   }
   // returns true when the click was used by a menu or the game-over screen
   function handleScreenClick(x, y) {
+    if (menu.screen === "initials") { if (picker.tap(x, y) === "ok") confirmInitials(); return true; }
     if (menu.screen === "results") { restart(); return true; }
     if (menu.screen === "howto" || menu.screen === "scores") { runMenuAction(menu.activate()); return true; }
     if (menu.screen === "pause" || menu.screen === "title") {
@@ -115,15 +140,17 @@
     const input = readInput();
     game.paused = menu.screen !== "playing";
     BB.update(game, dt, input);
-    if (!game.paused) renderer.update(dt, game);
+    if (!game.paused) { renderer.update(dt, game); runSeconds += dt; }
     if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);
     if (game.status === "over" && menu.screen === "playing") { // the run just ended: results replace game over
       results = stats.result(game);
-      scores = store.addScore(game.score, game.wave);
-      menu.finish();
+      if (BBScores.plausible(game.score, game.wave, runSeconds) && BBScores.qualifies(scores, game.score)) {
+        picker = BBInput.createInitialsPicker();
+        menu.screen = "initials";
+      } else menu.finish();
     }
-    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results });
+    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000, scores, results, highlight, picker });
     requestAnimationFrame(frame);
   }
   function start() {

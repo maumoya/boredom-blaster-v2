@@ -18,6 +18,7 @@
   };
   const SPRITE_SCALE = 1.35; // sprites are drawn a bit larger than their hitbox
   const FLASH_TIME = 0.35;
+  const BLINK_HZ = 3; // blinks per second for a new high-score row
   const MAX_PARTICLES = 400;
   const STAR_LAYERS = [
     { count: 30, speed: 18, size: 1, sprite: null },
@@ -396,19 +397,44 @@
       text("BEST " + (view.best || 0), W / 2, 500, 16, "#fd4", "center");
     }
 
+    // top-10 table: rank, initials, score, wave; the freshly added row blinks until view.highlight.until
+    function drawTable(view, top, rowH, size) {
+      const list = view.scores || [], hl = view.highlight, t = view.time || 0;
+      list.forEach((s, i) => {
+        const y = top + i * rowH, isNew = !!hl && hl.index === i && t < hl.until;
+        if (isNew && !reducedMotion && Math.floor(t * BLINK_HZ * 2) % 2) return; // blink off phase
+        const color = isNew ? "#4df" : i === 0 ? "#fd4" : "#fff";
+        text(String(i + 1) + ".", 90, y, size, "#9ab");
+        text(s.initials || "AAA", 140, y, size, color);
+        text(String(s.score).padStart(6, "0"), 230, y, size, color);
+        text("W" + s.wave, 390, y, size - 3, "#9ab", "right");
+      });
+    }
+
     function drawScores(view) {
-      const list = view.scores || [];
       dim(0.82);
       ui.panel(40, 90, W - 80, 440, { stroke: "#fd4" });
       ui.title("HIGH SCORES", W / 2, 150, 28, "#fd4");
-      if (!list.length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
-      list.forEach((s, i) => {
-        const y = 210 + i * 46;
-        text(String(i + 1) + ".", 90, y, 20, "#9ab");
-        text(String(s.score).padStart(6, "0"), 130, y, 20, i === 0 ? "#fd4" : "#fff");
-        text("WAVE " + s.wave, 390, y, 15, "#9ab", "right");
-      });
+      if (!(view.scores || []).length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
+      drawTable(view, 195, 28, 20);
       text("Press Enter, P or tap to go back", W / 2, 500, 14, "#fd4", "center");
+    }
+
+    // new record: three letter slots with up/down boxes and an OK button
+    function drawInitials(view) {
+      const L = root.BBInput.INITIALS_LAYOUT, picker = view.picker;
+      dim(0.82);
+      ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
+      ui.title("NEW RECORD!", W / 2, 150, 32, "#fd4");
+      text("SCORE " + (view.results ? view.results.score : view.game.score), W / 2, 185, 18, "#fff", "center");
+      for (let i = 0; i < 3; i++) {
+        const x = L.slotX[i], hot = !!picker && picker.slot === i;
+        text("▲", x, L.upY + 8, 24, hot ? "#fd4" : "#9ab", "center");
+        text(picker ? picker.value()[i] : "A", x, L.letterY, 44, hot ? "#fd4" : "#fff", "center");
+        text("▼", x, L.downY + 8, 24, hot ? "#fd4" : "#9ab", "center");
+      }
+      ui.button(L.ok.x, L.ok.y, L.ok.w, L.ok.h, "OK", "hot");
+      text("Arrows: letters and slots, Enter: OK", W / 2, 490, 13, "#9ab", "center");
     }
 
     function drawHowTo() {
@@ -428,19 +454,20 @@
       const game = view.game, t = view.time || 0;
       const res = view.results || { score: game.score, wave: game.wave, stars: 0, goals: [] };
       dim(0.7);
-      ui.panel(50, 100, W - 100, 420, { stroke: "#f55" });
-      ui.title("RESULTS", W / 2, 160, 36, "#f55");
-      ui.stars(W / 2, 205, res.stars, 3, 16);
-      text("SCORE " + res.score, W / 2, 265, 24, "#fff", "center");
-      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 295, 15, "#fd4", "center");
-      text("GOALS", W / 2, 335, 13, "#9ab", "center");
+      ui.panel(50, 20, W - 100, 600, { stroke: "#f55" });
+      ui.title("RESULTS", W / 2, 70, 32, "#f55");
+      ui.stars(W / 2, 100, res.stars, 3, 13);
+      text("SCORE " + res.score, W / 2, 145, 22, "#fff", "center");
+      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 170, 14, "#fd4", "center");
       res.goals.forEach((g, i) => {
-        const y = 365 + i * 32;
-        ui.icon(GOAL_ICON[g.id] || "star", 100, y - 5, 22, g.done ? "#ffd23c" : "rgba(255,255,255,0.3)");
-        text(g.label, 124, y, 15, g.done ? "#fff" : "#789");
-        text(g.done ? "DONE" : "-", 380, y, 14, g.done ? "#6e6" : "#789", "right");
+        const y = 205 + i * 24;
+        ui.icon(GOAL_ICON[g.id] || "star", 100, y - 5, 18, g.done ? "#ffd23c" : "rgba(255,255,255,0.3)");
+        text(g.label, 124, y, 14, g.done ? "#fff" : "#789");
+        text(g.done ? "DONE" : "-", 380, y, 13, g.done ? "#6e6" : "#789", "right");
       });
-      pulsed(W / 2, 485, t, () => text("Press Enter to replay", W / 2, 485, 18, "#4df", "center"));
+      text("TOP 10", W / 2, 305, 13, "#9ab", "center");
+      drawTable(view, 335, 21, 16);
+      pulsed(W / 2, 580, t, () => text("Press Enter to replay", W / 2, 580, 18, "#4df", "center"));
     }
 
     // view: { game, menu, best, touch, touchSeen, time, scores, results }
@@ -468,7 +495,8 @@
       drawHud(view);
       drawControls(view);
       const screen = view.menu && view.menu.screen;
-      if (game.status === "over" || screen === "results") drawResults(view);
+      if (screen === "initials") drawInitials(view);
+      else if (game.status === "over" || screen === "results") drawResults(view);
       else if (screen === "title") drawTitle(view);
       else if (screen === "scores") drawScores(view);
       else if (screen === "pause") drawPause(view.menu);
