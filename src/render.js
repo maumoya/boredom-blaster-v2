@@ -26,6 +26,9 @@
   const SLOW_FRAME = 0.02; // a frame longer than this steps the effects down
   const FX_RECOVER = 1.5; // seconds of quick frames before the effects step back up
   const BLOOM_LIFE = 0.5;
+  const BOSS_CHAIN = { blasts: 7, worldBlasts: 12, span: 0.9 }; // a beaten boss goes off in a chain of blasts
+  const BOSS_FLASH = 0.35; // seconds of the white-orange flash when a boss dies
+  const BOSS_SHAKE = { time: 0.7, mag: 14 };
   const DEFAULT_HALO = "120,90,255";
   const STAR_LAYERS = [
     { count: 30, speed: 18, size: 1, sprite: null },
@@ -82,6 +85,9 @@
     const particles = [];
     const rings = []; // explosion shockwaves
     const blooms = []; // explosion bloom: layered radial gradients
+    const chains = []; // beaten bosses still going off: { x, y, w, h, left, clock, step, n }
+    const bossClock = new WeakMap(); // hurt boss -> seconds until its next puff of smoke or small blast
+    const boomFlash = { time: 0 };
     const hitFlash = new WeakMap(); // enemy -> seconds of white flash left
     const lastHp = new WeakMap(); // enemy -> hp seen last frame
     const fx = { full: true, calm: 0 }; // full effects, or stepped down after a slow frame
@@ -156,6 +162,16 @@
           color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? N.yellow : "#f74", size: (big ? 6 : 4) + (i % 3),
         });
       }
+      const flames = (big ? 26 : 10) >> (fx.full ? 0 : 1); // fire that cools from white to red as it slows
+      for (let i = 0; i < flames; i++) {
+        const a = i * 2.39996, v = (big ? 110 : 70) * (0.3 + ((i * 53) % 10) / 10);
+        emit({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.45 + ((i * 7) % 6) * 0.07, size: (big ? 16 : 10) + (i % 4) * 2, fire: true, color: "#fff" });
+      }
+      const puffs = fx.full ? (big ? 8 : 3) : 0; // smoke that swells and drifts up
+      for (let i = 0; i < puffs; i++) {
+        const a = (i / puffs) * Math.PI * 2 + 0.3, v = 30 + (i % 3) * 14;
+        emit({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 20, life: 0.6 + (i % 3) * 0.15, size: big ? 22 : 14, smoke: true, color: "#555" });
+      }
       const chunks = fx.full ? (big ? 12 : 6) : 0; // larger debris that lingers
       for (let i = 0; i < chunks; i++) {
         const a = (i / chunks) * Math.PI * 2 + 0.5, v = (big ? 120 : 80) * (0.5 + ((i * 29) % 7) / 7);
@@ -163,6 +179,41 @@
           x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.7 + ((i * 11) % 4) * 0.08,
           color: i % 2 ? "#c86" : "#999", size: (big ? 10 : 8) + (i % 3) * 2, debris: true,
         });
+      }
+    }
+    // a beaten boss: one big blast now, then a chain of blasts across its body, a flash and a long shake
+    function bossDeath(d) {
+      const cx = d.x + d.w / 2, cy = d.y + d.h / 2;
+      explode(cx, cy, true);
+      rings.push({ x: cx, y: cy, life: SHOCK.life * 2, max: SHOCK.life * 2, radius: SHOCK.bigRadius * 1.8, wide: true });
+      const n = d.worldBoss ? BOSS_CHAIN.worldBlasts : BOSS_CHAIN.blasts;
+      chains.push({ x: d.x, y: d.y, w: d.w, h: d.h, n, i: 0, clock: 0, step: BOSS_CHAIN.span / n });
+      boomFlash.time = BOSS_FLASH;
+      if (!reducedMotion) Object.assign(shake, { time: BOSS_SHAKE.time, max: BOSS_SHAKE.time, mag: BOSS_SHAKE.mag * (d.worldBoss ? 1.3 : 1) });
+    }
+    function stepChains(dt) {
+      for (const c of chains) {
+        c.clock += dt;
+        while (c.clock >= c.step && c.i < c.n) {
+          c.clock -= c.step;
+          const fx1 = ((c.i * 0.618) % 1), fy = ((c.i * 0.382 + 0.2) % 1); // spread over the boss, no Math.random
+          explode(c.x + c.w * (0.1 + 0.8 * fx1), c.y + c.h * (0.1 + 0.8 * fy), c.i % 3 === 2);
+          c.i++;
+        }
+      }
+      for (let i = chains.length - 1; i >= 0; i--) if (chains[i].i >= chains[i].n) chains.splice(i, 1);
+    }
+    // a hurt boss smokes below half life and throws small blasts below a quarter
+    function stepHurtBosses(drones, dt) {
+      for (const d of drones) {
+        if (!d.boss || !d.maxHp || d.entry || d.hp / d.maxHp >= 0.5) continue;
+        const low = d.hp / d.maxHp < 0.25;
+        const left = (bossClock.get(d) || 0) - dt;
+        if (left > 0) { bossClock.set(d, left); continue; }
+        bossClock.set(d, low ? 0.35 : 0.22);
+        const k = (d.hp * 7.13) % 1, x = d.x + d.w * (0.2 + 0.6 * k), y = d.y + d.h * (0.3 + 0.5 * ((k * 3.7) % 1));
+        if (low && fx.full) explode(x, y, false);
+        else emit({ x, y, vx: (k - 0.5) * 30, vy: -25, life: 1, size: 12, smoke: true, color: "#555" });
       }
     }
     // a few quick sparks where an enemy was hit
@@ -201,8 +252,11 @@
       trackHits(game.drones, dt);
       const alive = new Set(game.drones);
       for (const d of prev.drones) {
-        if (!alive.has(d)) explode(d.x + d.w / 2, d.y + d.h / 2, !!d.boss);
+        if (!alive.has(d)) { if (d.boss) bossDeath(d); else explode(d.x + d.w / 2, d.y + d.h / 2, false); }
       }
+      stepChains(dt);
+      stepHurtBosses(game.drones, dt);
+      boomFlash.time = Math.max(0, boomFlash.time - dt);
       if (prev.lives !== null && game.lives < prev.lives) {
         flash.time = FLASH_TIME;
         if (!reducedMotion) Object.assign(shake, { time: SHAKE.time, max: SHAKE.time, mag: SHAKE.mag });
@@ -221,6 +275,7 @@
       for (const p of particles) {
         p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
         if (p.debris) { p.vx *= 0.97; p.vy = p.vy * 0.97 + 60 * dt; }
+        if (p.fire || p.smoke) { p.vx *= 0.93; p.vy *= 0.93; }
       }
       for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
       for (const b of blooms) b.life -= dt;
@@ -334,6 +389,7 @@
       for (const r of rings) {
         const k = 1 - r.life / r.max;
         ctx.globalAlpha = Math.max(0, 1 - k);
+        if (r.wide) circle(r.x, r.y, r.radius * k, null, "rgba(255,150,60,0.6)", 14 * (1 - k) + 2); // a slow orange wave
         circle(r.x, r.y, r.radius * k, null, "#fff", 3 * (1 - k) + 1);
       }
       ctx.restore();
@@ -402,7 +458,7 @@
 
     function drawEnemy(e) {
       const [cx, cy] = center(e);
-      const w = e.w * (e.boss ? 1.1 : SPRITE_SCALE);
+      const w = e.w * (e.worldBoss ? 1.35 : e.boss ? 1.22 : SPRITE_SCALE);
       const tinted = info && (info.world > 1 || info.loop > 0);
       const halo = info ? info.tint.halo : DEFAULT_HALO;
       ctx.save(); // glow outline in the world tint
@@ -410,6 +466,7 @@
       glow(cx, cy, w * 0.85, halo, 0.22);
       circle(cx, cy, w * 0.46, null, "rgba(" + halo + ",0.55)", 2);
       ctx.restore();
+      if (e.boss) drawBossAura(e, cx, cy, w, halo);
       if (tinted) { // each world tints its enemies: a halo everywhere, a hue shift where the canvas has filters
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
@@ -427,6 +484,35 @@
         circle(cx, cy, w * 0.3, "rgba(255,255,255,0.6)");
         ctx.restore();
       }
+    }
+
+    // bosses: a pulsing energy core and a turning ring of arcs in the world tint; world bosses add a second
+    // ring and orbiting orbs; under a quarter life the aura throbs red
+    function drawBossAura(e, cx, cy, w, halo) {
+      const t = scroll, low = e.maxHp && e.hp / e.maxHp < 0.25;
+      const rgb = low && Math.sin(t * 14) > 0 ? "255,60,40" : halo;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      glow(cx, cy, w * (1.05 + 0.08 * Math.sin(t * 5)), rgb, 0.35);
+      ctx.lineCap = "round";
+      const rings2 = e.worldBoss ? [[0.72, 1, 6], [0.86, -0.7, 9]] : [[0.74, 1, 6]];
+      for (const [rr, spin, segs] of rings2) {
+        ctx.strokeStyle = "rgba(" + rgb + ",0.75)";
+        ctx.lineWidth = 3;
+        for (let i = 0; i < segs; i++) {
+          const a = t * spin * 1.4 + (i / segs) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, w * rr, a, a + (Math.PI * 2 / segs) * 0.55);
+          ctx.stroke();
+        }
+      }
+      if (e.worldBoss) for (let i = 0; i < 4; i++) {
+        const a = -t * 1.8 + i * Math.PI / 2;
+        const ox = cx + Math.cos(a) * w * 0.95, oy = cy + Math.sin(a) * w * 0.5;
+        glow(ox, oy, 16, rgb, 0.8);
+        circle(ox, oy, 4, "#fff");
+      }
+      ctx.restore();
     }
 
     // MASTERED projectiles glow gold, ULTRA-MAD ones red-hot; ULTRA-MAD faster shots leave a trail
@@ -836,11 +922,27 @@
       ctx.restore();
     }
 
+    // fire cools from white through yellow and orange to deep red as it fades
+    function fireColor(k) { return k < 0.2 ? "#fff" : k < 0.45 ? "#ffd94a" : k < 0.7 ? "#ff8a2a" : "#d8322a"; }
     function drawParticles() {
+      ctx.save(); // smoke first, plainly blended, so the fire glows over it
+      for (const p of particles) {
+        if (!p.smoke) continue;
+        const k = 1 - p.life / p.max;
+        circle(p.x, p.y, p.size * (0.6 + 1.2 * k), "rgba(70,66,80," + (0.45 * (1 - k)) + ")");
+      }
+      ctx.restore();
       drawBlooms();
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (const p of particles) {
+        if (p.smoke) continue;
+        if (p.fire) {
+          const k = 1 - p.life / p.max;
+          ctx.globalAlpha = Math.max(0, 1 - k * 0.9);
+          circle(p.x, p.y, p.size * (1 - 0.7 * k) / 2, fireColor(k));
+          continue;
+        }
         ctx.globalAlpha = Math.max(0, p.life / p.max);
         ctx.fillStyle = p.color;
         ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
@@ -1249,6 +1351,11 @@
         ctx.fillRect(0, 0, W, H);
       }
       if (game.nuke) drawNukeFlash(game.nuke);
+      if (boomFlash.time > 0) { // a boss going down lights the whole playfield
+        const k = boomFlash.time / BOSS_FLASH;
+        ctx.fillStyle = "rgba(255,230,190," + (0.55 * k * k * (reducedMotion ? NUKE_FLASH.dimmed : 1)) + ")";
+        ctx.fillRect(0, 0, W, H);
+      }
       ctx.restore();
       drawHud(view);
       drawControls(view);
@@ -1270,7 +1377,7 @@
 
     return {
       update, draw, explode, particles, pulse,
-      fullEffects: () => fx.full, bloomCount: () => blooms.length,
+      fullEffects: () => fx.full, bloomCount: () => blooms.length, chainCount: () => chains.length, bossFlash: () => boomFlash.time,
       setReducedMotion(on) { reducedMotion = !!on; if (reducedMotion) shake.time = 0; },
       isReducedMotion: () => reducedMotion,
     };
