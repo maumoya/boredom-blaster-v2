@@ -51,7 +51,7 @@
   }
   const HOW_TO_ROWS = howToRows(root.BBKeys.createKeys(null));
   const HOW_TO = HOW_TO_ROWS.map((r) => r.text);
-  const SHAKE = { time: 0.3, mag: 6 }; // screen shake after a lost life
+  const SHAKE = { time: 0.25, mag: 6 }; // screen shake after a lost life
   const PULSE = { depth: 0.06, speed: 4 }; // gentle breathing of the title and the replay prompt
   const GOAL_ICON = { miniboss: "escort", kaboom: "boom", weapon: "weapon" };
 
@@ -304,6 +304,22 @@
       text("BOSS", 12, y + 9, 11, "#f88");
     }
 
+    // speaker icon left of the pause button; a cross over it while everything is muted
+    function drawSpeaker(muted) {
+      const S = root.BBAudio ? root.BBAudio.SPEAKER : { x: 396, y: 16 }, color = muted ? N.red : "#fff";
+      ctx.save();
+      ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(S.x - 8, S.y - 3); ctx.lineTo(S.x - 4, S.y - 3); ctx.lineTo(S.x + 1, S.y - 8);
+      ctx.lineTo(S.x + 1, S.y + 8); ctx.lineTo(S.x - 4, S.y + 3); ctx.lineTo(S.x - 8, S.y + 3);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      if (muted) { ctx.moveTo(S.x + 5, S.y - 5); ctx.lineTo(S.x + 12, S.y + 5); ctx.moveTo(S.x + 12, S.y - 5); ctx.lineTo(S.x + 5, S.y + 5); }
+      else { ctx.arc(S.x + 2, S.y, 5, -0.9, 0.9); ctx.moveTo(S.x + 2 + 9 * Math.cos(0.9), S.y + 9 * Math.sin(0.9)); ctx.arc(S.x + 2, S.y, 9, 0.9, -0.9, true); }
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function drawHud(view) {
       const { game } = view, t = view.time || 0;
       const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
@@ -316,6 +332,7 @@
       const paused = view.menu && view.menu.screen === "pause";
       ui.button(P.x, P.y, P.w, P.h, "", paused ? "pressed" : "idle");
       ui.icon("pause", P.x + P.w / 2, P.y + P.h / 2 + (paused ? 2 : 0), 16, "#fff");
+      drawSpeaker(!!view.muted);
       // row 2: score counter and the weapon / shield / escort bars
       text("SCORE", 10, 43, 9, N.dim);
       text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
@@ -485,8 +502,9 @@
         const y = L.y + i * (L.h + L.gap), hot = i === menu.cursor;
         ui.button(L.x, y, L.w, L.h, "", hot ? "hot" : "idle");
         const ink = hot ? "#1a1000" : "#fff";
-        text(row.label, L.x + 14, y + 19, 14, ink);
-        if (row.value) text(row.value, L.x + L.w - 14, y + 19, 14, menu.capturing && hot ? N.red : ink, "right");
+        const base = y + L.h / 2 + 5;
+        text(row.label, L.x + 14, base, 14, ink);
+        if (row.value) text(row.value, L.x + L.w - 14, base, 14, menu.capturing && hot ? N.red : ink, "right");
       });
       text("Arrows and Esc always work. Esc or P: back", W / 2, 626, 12, N.yellow, "center");
     }

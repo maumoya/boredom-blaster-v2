@@ -32,6 +32,44 @@
   const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded(), keys, settings, controls, pad: padMap });
   const gamepad = BBInput.createGamepad({ pad: padMap });
 
+  // sound: starts on the first key, tap or click; volumes and presets live in the Settings screen
+  const audio = BBAudio.createAudio({ settings, storage });
+  const haptics = BBAudio.createHaptics({ settings });
+  const unlockAudio = () => audio.unlock();
+  addEventListener("keydown", unlockAudio);
+  addEventListener("pointerdown", unlockAudio);
+  Object.assign(BBInput.SETTINGS_LAYOUT, { h: 22, gap: 1 }); // three more rows (two volumes, presets) need tighter rows
+  const baseRows = menu.settingsRows;
+  menu.settingsRows = () => {
+    const rows = baseRows();
+    const at = rows.findIndex((r) => r.type === "control");
+    rows.splice(at, 0,
+      { type: "volume", kind: "music", label: "Music volume", value: audio.volume("music") + "%" },
+      { type: "volume", kind: "effects", label: "Effects volume", value: audio.volume("effects") + "%" },
+      { type: "preset", label: "Sound preset", value: audio.preset() });
+    return rows;
+  };
+  const baseActivate = menu.activate;
+  menu.activate = (index) => {
+    if (menu.screen !== "settings") return baseActivate(index);
+    const i = index === undefined ? menu.cursor : index, row = menu.settingsRows()[i];
+    if (!row || (row.type !== "volume" && row.type !== "preset")) return baseActivate(index);
+    menu.cursor = i;
+    if (row.type === "preset") audio.nextPreset();
+    else audio.setVolume(row.kind, (audio.volume(row.kind) + BBAudio.STEP) % (100 + BBAudio.STEP)); // Enter cycles 0..100 %
+    audio.play("click");
+    return "audio";
+  };
+  // left / right on a volume row, or a tap on its left / right part, steps the volume by 10 %
+  function nudgeVolume(i, dir) {
+    const row = menu.settingsRows()[i];
+    if (!row || row.type !== "volume") return false;
+    menu.cursor = i;
+    audio.stepVolume(row.kind, dir);
+    audio.play("click");
+    return true;
+  }
+
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
   let scores = scoreStore.load();
@@ -134,6 +172,7 @@
     if (menu.screen === "pause" || menu.screen === "title" || menu.screen === "settings") {
       if (action === "up") { menu.move(-1); e.preventDefault(); return; }
       if (action === "down") { menu.move(1); e.preventDefault(); return; }
+      if (menu.screen === "settings" && (action === "left" || action === "right") && nudgeVolume(menu.cursor, action === "left" ? -1 : 1)) { e.preventDefault(); return; }
     }
     if (keyboard.keydown(e.code)) e.preventDefault();
   });
@@ -157,7 +196,8 @@
     if (menu.gearHit(x, y)) { menu.openSettings(); return true; }
     if (menu.screen === "settings") {
       const i = menu.itemAt(x, y);
-      if (i >= 0) menu.activate(i);
+      const L = BBInput.SETTINGS_LAYOUT;
+      if (i >= 0 && !nudgeVolume(i, x < L.x + L.w * 0.6 ? -1 : 1)) menu.activate(i);
       return true;
     }
     if (menu.screen === "howto") { runMenuAction(menu.activate()); return true; }
@@ -173,6 +213,7 @@
     const isMouse = e.pointerType === "mouse";
     if (!isMouse) touchSeen = true;
     if (handleScreenClick(x, y)) return;
+    if (BBAudio.speakerHit(x, y)) { audio.toggleMute(); return; } // the speaker icon in the top bar
     if (BBInput.pauseHit(x, y)) { menu.toggle(); return; } // the pause icon in the top bar
     canvas.setPointerCapture(e.pointerId);
     if (isMouse) mouse.down(x, y, e.button);
@@ -220,11 +261,7 @@
     const pp = gamepad.takePressed();
     if (padBusy) Object.keys(pp).forEach((a) => { pp[a] = false; });
     if ((kp.pause || pp.pause) && game.status === "playing") menu.toggle();
-    if (kp.mute || pp.mute) { // M or the pad's Y: all sound off, or back on
-      const on = !(settings.get("music") || settings.get("sounds"));
-      settings.set("music", on);
-      settings.set("sounds", on);
-    }
+    if (kp.mute || pp.mute) audio.toggleMute(); // M or the pad's Y: all sound off, or back on
     if (menu.screen !== "playing") return {};
     if (kp.special || tp.special || pp.special) BB.special(game);
     if ((kp.kaboom || tp.kaboom || pp.kaboom) && BB.kaboom(game)) stats.kaboomUsed();
@@ -241,7 +278,10 @@
     game.paused = menu.screen !== "playing";
     const livesBefore = game.lives;
     BB.update(game, dt, input);
-    if (game.lives < livesBefore && settings.get("vibration") && navigator.vibrate) navigator.vibrate(80);
+    if (game.lives < livesBefore) haptics.hit(); // Android buzz or iPhone haptic tick; shake and red flash come from the renderer
+    audio.observe(game);
+    audio.setTheme(menu.screen === "playing" || menu.screen === "pause" ? (game.drones.some((d) => d.boss) ? "boss" : "play") : "title", game.wave);
+    audio.tick();
     if (!game.paused) { renderer.update(dt, game); runSeconds += dt; }
     if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);
@@ -255,7 +295,7 @@
     const onScores = menu.screen === "scores";
     if (onScores && !wasOnScores) refreshGlobal(); // opening the table asks the server again
     wasOnScores = onScores;
-    renderer.draw({ game, menu, best, touch, touchSeen, padConnected: gamepad.connected(), firing: keyboard.fire() || gamepad.fire(), time: now / 1000, scores, results, highlight, picker, tab: scoresTab, net: netView });
+    renderer.draw({ game, menu, best, touch, touchSeen, padConnected: gamepad.connected(), firing: keyboard.fire() || gamepad.fire(), time: now / 1000, muted: audio.muted(), scores, results, highlight, picker, tab: scoresTab, net: netView });
     requestAnimationFrame(frame);
   }
   function start() {
