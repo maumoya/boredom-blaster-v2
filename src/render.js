@@ -320,6 +320,72 @@
       }
     }
 
+    // Laser beams go straight up: cyan, MASTERED gold, ULTRA-MAD red. A limited beam stops at its last enemy.
+    function drawLaser(game, t) {
+      const beam = game.laserBeam;
+      if (!beam) return;
+      const tier = root.BBSkills.tier(game, "laser"), color = tier >= 7 ? "#ff4b1f" : tier >= 6 ? "#ffd23c" : N.cyan;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      beam.cols.forEach((cx, i) => {
+        const top = beam.reach[i] || 0, w = 10 + 2 * Math.sin(t * 60);
+        ctx.fillStyle = color; ctx.globalAlpha = 0.35;
+        ctx.fillRect(cx - w, top, w * 2, game.ship.y - top);
+        ctx.globalAlpha = 0.95; ctx.fillStyle = "#fff";
+        ctx.fillRect(cx - 2, top, 4, game.ship.y - top);
+      });
+      ctx.restore();
+    }
+
+    // Moons orbit the ship: cracks grow as they take damage; MASTERED gold, ULTRA-MAD red with a fire trail.
+    function drawMoons(game, t) {
+      const B = root.BB, tier = root.BBSkills.tier(game, "moons");
+      if (game.status !== "playing" || !game.moons) return;
+      const color = tier >= 7 ? "#ff4b1f" : tier >= 6 ? "#ffd23c" : "#cfd8ff";
+      game.moons.forEach((m, i) => {
+        if (m.hp <= 0) return;
+        const p = B.moonPos(game, i), [cx, cy] = center(p), r = p.w / 2;
+        if (tier >= 7) { // fire trail behind the orbit
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          for (let k = 1; k <= 3; k++) {
+            const a = game.moonAngle + (i * Math.PI * 2) / game.moons.length - k * 0.22;
+            const ox = game.ship.x + game.ship.w / 2 + Math.cos(a) * B.MOON.orbit, oy = game.ship.y + game.ship.h / 2 + Math.sin(a) * B.MOON.orbit;
+            ctx.globalAlpha = 0.45 - k * 0.12; ctx.fillStyle = "#ff8a2a";
+            ctx.beginPath(); ctx.arc(ox, oy, r - k, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
+        }
+        circle(cx, cy, r, color, "#fff", 1);
+        const cracks = Math.min(5, Math.floor((1 - m.hp / m.max) * 6)); // more lines as the hits run out
+        ctx.strokeStyle = "#222"; ctx.lineWidth = 1.5;
+        for (let k = 0; k < cracks; k++) {
+          const a = k * 1.3 + 0.4;
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
+        }
+      });
+    }
+
+    function drawTwin(game, t) {
+      const B = root.BB;
+      if (game.twinFlash) {
+        const f = game.twinFlash, [cx, cy] = center(f);
+        ctx.globalAlpha = Math.max(0, f.life / 0.3);
+        circle(cx, cy, 10 + (0.3 - f.life) * 120, "#fff", null, 0);
+        ctx.globalAlpha = 1;
+      }
+      if (!game.twin || game.status !== "playing") return;
+      const r = B.twinRect(game), [cx, cy] = center(r);
+      ctx.globalAlpha = game.twin.life < 3 && Math.floor(t * 8) % 2 === 0 ? 0.4 : 0.85; // blinks before it leaves
+      sprite("ship", cx, cy, r.w * 1.6, () => {
+        ctx.fillStyle = "#8ff";
+        ctx.beginPath();
+        ctx.moveTo(cx, r.y); ctx.lineTo(r.x + r.w, r.y + r.h); ctx.lineTo(cx, r.y + r.h - 6); ctx.lineTo(r.x, r.y + r.h);
+        ctx.closePath(); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
     function drawEscort(e) {
       const [cx, cy] = center(e);
       sprite("escort", cx, cy, e.w * 1.5, () => { ctx.fillStyle = "#8ff"; ctx.fillRect(e.x + 3, e.y, e.w - 6, e.h); });
@@ -464,6 +530,23 @@
         state: game.kaboomCharges <= 0 ? "disabled" : held("kaboom") ? "pressed" : "idle", color: N.yellow,
         segments: { count: game.kaboomCharges, total: BB.KABOOM.maxCharges }, ready: glowing && game.kaboomCharges > 0, time: t,
       });
+      if (touch && touch.setOwned) { // LASER and TWIN appear only when owned
+        const S = root.BBSkills;
+        touch.setOwned({ laser: S.tier(game, "laser") > 0, twin: game.twinCharges > 0 || !!game.twin });
+        const X = touch.extraButtons();
+        if (X.laser) {
+          const p = Math.max(0, Math.min(1, 1 - game.laserCooldown / BB.LASER.cooldown));
+          ui.ringButton(X.laser.x, X.laser.y, X.laser.r, "star", {
+            state: game.laserBeam ? "pressed" : "idle", color: N.red || "#ff4b6e", cooldown: p, ready: glowing && p >= 1, time: t,
+          });
+        }
+        if (X.twin) {
+          ui.ringButton(X.twin.x, X.twin.y, X.twin.r, "weapon", {
+            state: game.twin || game.twinCharges <= 0 ? "disabled" : "idle", color: N.cyan,
+            segments: { count: game.twinCharges, total: root.BBRewards.TWIN.maxCharges }, ready: glowing && !game.twin && game.twinCharges > 0, time: t,
+          });
+        }
+      }
       if (layout && layout.dpad) ui.dpad(layout.dpad.x, layout.dpad.y, layout.dpad.r, touch.axes(), N.cyan);
       ctx.restore();
       drawStick(touch, !!(layout && layout.dpad));
@@ -645,7 +728,10 @@
       for (const e of game.escorts) drawEscort(e);
       for (const b of game.bullets) drawBullet(b);
       for (const b of game.enemyBullets) glowRect(b, "enemyBullet", N.red);
+      drawLaser(game, t);
       drawShip(game, t);
+      drawTwin(game, t);
+      drawMoons(game, t);
       drawShockwaves();
       drawParticles();
       for (const p of game.pops || []) { // ULTRA-MAD Score per hit: red floating points

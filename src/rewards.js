@@ -11,7 +11,9 @@
   // heart = an extra life
   // (the escort capsule is retired: gold now gives 2 skill picks, see skills.js)
   const REWARD = { bronze: "skill", silver: "skill", gold: "skill", rainbow: "superstar", heart: "life" };
-  const TWIN = { charges: 20 }; // a TWIN charge doubles one volley; a rainbow capsule gives it while Super Star is on
+  // a TWIN charge (at most 2) calls a twin ship for 15 s; a rainbow capsule gives one while Super Star is on
+  const TWIN = { maxCharges: 2, duration: 15, offset: 40 };
+  const MAGNETO = { pull: 140 }; // px/s a pulled capsule moves toward the ship (x2 at ULTRA-MAD)
   const SHIELD = { hits: 3, max: 9 }; // each shield capsule adds `hits`, stacking up to `max`
   const ESCORT = { max: 2, w: 14, h: 14, offset: 34 };
   const SUPER_STAR = { duration: 8, fireRateMult: 3 };
@@ -26,6 +28,7 @@
       set(v) { S.setTier(game, "more", Math.max(1, v)); },
     });
     game.twinCharges = 0;
+    game.twin = null; // { life } while a twin ship flies
     game.capsules = [];
     game.shield = 0;
     game.escorts = [];
@@ -90,7 +93,7 @@
       case "skill": root.BBSkills.capsule(game, rank); break;
       case "life": root.BB.addLife(game); break;
       case "superstar":
-        if (game.superStar > 0) game.twinCharges += TWIN.charges;
+        if (game.superStar > 0) game.twinCharges = Math.min(TWIN.maxCharges, game.twinCharges + 1);
         else game.superStar = SUPER_STAR.duration;
         break;
       default: return false;
@@ -100,7 +103,14 @@
 
   // Capsules fall; the ship catches them. hit is passed in to avoid a second copy.
   function updateCapsules(game, dt, hit, height) {
+    const S = root.BBSkills, mt = S.tier(game, "magneto"), range = S.magnetoRange(mt);
+    const sx = game.ship.x + game.ship.w / 2, sy = game.ship.y + game.ship.h / 2;
     for (const c of game.capsules) {
+      const dx = sx - (c.x + c.w / 2), dy = sy - (c.y + c.h / 2), len = Math.hypot(dx, dy);
+      if (range > 0 && Math.abs(dx) <= range && len > 0) { // Magneto: the capsule is drawn to the ship
+        const step = Math.min(len, MAGNETO.pull * S.magnetoSpeed(mt) * dt);
+        c.x += (dx / len) * step; c.y += (dy / len) * step;
+      }
       c.y += CAPSULE.speed * dt;
       if (hit(c, game.ship)) { c.caught = true; applyCapsule(game, c.rank); }
     }
@@ -134,7 +144,7 @@
   }
 
   root.BBRewards = {
-    WEAPON, TWIN, CAPSULE, RANKS, RANK_ODDS, REWARD, SHIELD, ESCORT, SUPER_STAR,
+    WEAPON, TWIN, MAGNETO, CAPSULE, RANKS, RANK_ODDS, REWARD, SHIELD, ESCORT, SUPER_STAR,
     initRewards, rollRank, spawnCapsule, onKill, onMiniBossKill, weaponShots, fireRateMult,
     addEscort, placeEscorts, applyCapsule, updateCapsules, updateTimers, onLifeLost, absorbHit, hitEscort,
   };

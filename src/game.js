@@ -22,7 +22,9 @@
   const R = () => root.BBRewards; // src/rewards.js, loaded before the game is created
   const E = () => root.BBEnemies; // src/enemies.js, loaded before the game is created
   const K = () => root.BBSkills; // src/skills.js, loaded right behind this file
-  const TWIN_GAP = 8; // px each side of a stream when a TWIN charge doubles the volley
+  const LASER = { duration: 1.5, cooldown: 6, tick: 0.1, damage: 1, bossDamage: 2, w: 10, gap: 36 };
+  const MOON = { r: 8, orbit: 46, speed: 2.4, bossDamage: 5, bossGap: 0.5 };
+  const BEND = { radius: 30, accel: 900 }; // ULTRA-MAD Magneto bends enemy bullets near the ship
 
   function hit(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -40,6 +42,97 @@
     }
     game.drones.push(...E().spawnEnemies(game, script));
     game.dir = 1;
+    regrowMoons(game); // broken moons grow back at the next wave
+  }
+
+  // ---- moons ----
+  function regrowMoons(game) {
+    const S = K(), t = S.tier(game, "moons");
+    game.moons = Array.from({ length: S.moonCount(t) }, () => ({ hp: S.moonHits(t), max: S.moonHits(t), cd: 0 }));
+  }
+  function moonPos(game, i) {
+    const n = game.moons.length, a = game.moonAngle + (i * Math.PI * 2) / n;
+    return {
+      x: game.ship.x + game.ship.w / 2 + Math.cos(a) * MOON.orbit - MOON.r,
+      y: game.ship.y + game.ship.h / 2 + Math.sin(a) * MOON.orbit - MOON.r,
+      w: MOON.r * 2, h: MOON.r * 2,
+    };
+  }
+  // an upgrade adds moons (and refreshes the hits of the ones that exist) at once
+  function syncMoons(game) {
+    const S = K(), t = S.tier(game, "moons"), hits = S.moonHits(t);
+    while (game.moons.length < S.moonCount(t)) game.moons.push({ hp: hits, max: hits, cd: 0 });
+    for (const m of game.moons) if (m.max !== hits) { m.max = hits; m.hp = hits; }
+  }
+  function stepMoons(game, dt) {
+    syncMoons(game);
+    game.moonAngle = (game.moonAngle + MOON.speed * dt) % (Math.PI * 2);
+    game.moons.forEach((m, i) => {
+      m.cd = Math.max(0, m.cd - dt);
+      if (m.hp <= 0) return;
+      const box = moonPos(game, i);
+      for (const eb of game.enemyBullets) {
+        if (m.hp > 0 && !eb.dead && hit(eb, box)) { eb.dead = true; m.hp -= 1; }
+      }
+      for (const e of game.drones) {
+        if (m.hp <= 0 || e.dead || !hit(e, box)) continue;
+        if (e.boss) {
+          if (m.cd > 0) continue;
+          m.cd = MOON.bossGap;
+          hurt(game, e, MOON.bossDamage);
+        } else hurt(game, e, Infinity);
+        m.hp -= 1;
+      }
+    });
+    game.enemyBullets = game.enemyBullets.filter((eb) => !eb.dead);
+  }
+
+  // ---- laser ----
+  function laser(game) {
+    if (game.status !== "playing" || game.paused || K().tier(game, "laser") <= 0 || game.laserCooldown > 0 || game.laserBeam) return false;
+    game.laserBeam = { time: LASER.duration, acc: 0, cols: laserColumns(game), reach: [] };
+    game.laserCooldown = LASER.cooldown;
+    return true;
+  }
+  function laserColumns(game) {
+    const S = K(), n = S.laserBeams(S.tier(game, "laser")), cx = game.ship.x + game.ship.w / 2;
+    return Array.from({ length: n }, (_, i) => cx + (i - (n - 1) / 2) * LASER.gap);
+  }
+  // the beam goes straight up; each tick it damages the nearest `crosses` enemies in every column
+  function stepLaser(game, dt) {
+    game.laserCooldown = Math.max(0, game.laserCooldown - dt);
+    const beam = game.laserBeam;
+    if (!beam) return;
+    const crosses = K().laserCrosses(K().tier(game, "laser"));
+    beam.time -= dt; beam.acc += dt;
+    beam.cols = laserColumns(game);
+    while (beam.acc >= LASER.tick - 1e-9) {
+      beam.acc -= LASER.tick;
+      beam.reach = beam.cols.map((cx) => {
+        const hits = game.drones.filter((e) => !e.dead && e.x < cx + LASER.w / 2 && e.x + e.w > cx - LASER.w / 2 && e.y + e.h <= game.ship.y)
+          .sort((a, b) => b.y - a.y).slice(0, crosses);
+        for (const e of hits) hurt(game, e, e.boss ? LASER.bossDamage : LASER.damage);
+        return hits.length === crosses ? Math.min(...hits.map((e) => e.y)) : 0; // where a limited beam ends (0 = the top)
+      });
+    }
+    if (beam.time <= 1e-9) game.laserBeam = null;
+  }
+
+  // ---- twin ship ----
+  function twinRect(game) {
+    const s = game.ship, off = R().TWIN.offset;
+    return { x: s.x + off + s.w > W ? s.x - off : s.x + off, y: s.y, w: s.w, h: s.h };
+  }
+  // Calls the twin ship (spends a charge); it flies 15 s or until it takes one hit.
+  function twin(game) {
+    if (game.status !== "playing" || game.paused || game.twinCharges <= 0 || game.twin) return false;
+    game.twinCharges -= 1;
+    game.twin = { life: R().TWIN.duration };
+    return true;
+  }
+  function twinHit(game) { // it leaves in a flash
+    game.twinFlash = { ...twinRect(game), life: 0.3 };
+    game.twin = null;
   }
 
   // opts.rng: optional seeded random source (tests); defaults to Math.random
@@ -50,7 +143,7 @@
       bullets: [], drones: [], enemyBullets: [],
       score: 0, lives: START_LIVES, wave: 1,
       cooldown: 0, invuln: 0, dir: 1,
-      specialCooldown: 0, kills: 0, kaboomCharges: 0, paused: false,
+      specialCooldown: 0, laserCooldown: 0, laserBeam: null, moonAngle: 0, moons: [], twinFlash: null, kills: 0, kaboomCharges: 0, paused: false,
       status: "playing", // "playing" | "over"
     };
     if (opts && opts.rng) game.rng = opts.rng;
@@ -64,13 +157,13 @@
     const S = K(), tr = (id) => S.tier(game, id);
     const w = BULLET.w * S.widthMult(tr("larger")), h = BULLET.h * S.sizeMult(tr("larger"));
     const speed = BULLET.speed * S.bulletSpeed(tr("faster"));
-    const twin = game.twinCharges > 0;
-    if (twin) game.twinCharges -= 1;
-    for (const v of S.volley(tr("more"))) {
-      for (const twinDx of twin ? [-TWIN_GAP, TWIN_GAP] : [0]) {
+    const origins = [game.ship];
+    if (game.twin) origins.push(twinRect(game)); // the twin fires the full pattern too
+    for (const o of origins) {
+      for (const v of S.volley(tr("more"))) {
         game.bullets.push({
-          x: game.ship.x + (game.ship.w - w) / 2 + v.dx + twinDx,
-          y: v.dir < 0 ? game.ship.y - h : game.ship.y + game.ship.h,
+          x: o.x + (o.w - w) / 2 + v.dx,
+          y: v.dir < 0 ? o.y - h : o.y + o.h,
           w, h, speed, vx: Math.sin(v.angle) * speed, dir: v.dir,
           pierces: S.pierce(tr("larger")), trail: S.hasTrails(tr("faster")),
           tier: S.highestTier(game),
@@ -174,6 +267,16 @@
     return len > 1 ? { x: x / len, y: y / len } : { x, y };
   }
 
+  // ULTRA-MAD Magneto: enemy bullets within 30 px of the ship are bent away from it
+  function bendBullets(game, dt) {
+    if (K().tier(game, "magneto") < K().ULTRA) return;
+    const cx = game.ship.x + game.ship.w / 2, cy = game.ship.y + game.ship.h / 2;
+    for (const b of game.enemyBullets) {
+      const dx = b.x + b.w / 2 - cx, dy = b.y + b.h / 2 - cy;
+      if (Math.hypot(dx, dy) < BEND.radius) b.vx += (dx >= 0 ? 1 : -1) * BEND.accel * dt;
+    }
+  }
+
   // input: { mx, my (analog -1..1) or left, right, up, down, fire }; dt in seconds
   function update(game, dt, input) {
     if (game.status !== "playing" || game.paused) return;
@@ -188,7 +291,13 @@
     game.invuln = Math.max(0, game.invuln - dt);
     R().updateTimers(game, dt);
     R().updateCapsules(game, dt, hit, H);
+    const queued = root.BBInput && root.BBInput.takeActions ? root.BBInput.takeActions() : {};
+    if (input.laser || queued.laser) laser(game);
+    if (input.twin || queued.twin) twin(game);
+    if (game.twin) { game.twin.life -= dt; if (game.twin.life <= 0) game.twin = null; }
+    if (game.twinFlash) { game.twinFlash.life -= dt; if (game.twinFlash.life <= 0) game.twinFlash = null; }
     if (input.fire) shoot(game);
+    bendBullets(game, dt);
 
     E().updateEnemies(game, dt);
     E().moveBullets(game, dt);
@@ -239,7 +348,19 @@
       }
     }
     game.bullets = game.bullets.filter((b) => !b.dead);
+    stepLaser(game, dt);
+    stepMoons(game, dt);
     game.drones = game.drones.filter((d) => !d.dead);
+
+    // the twin takes the first hit (a shot or a touch) and leaves
+    if (game.twin) {
+      const box = twinRect(game), eb = game.enemyBullets.find((b) => hit(b, box)), touch = game.drones.find((d) => hit(d, box));
+      if (eb) eb.dead = true;
+      if (touch && !touch.boss) touch.dead = true;
+      if (eb || touch) twinHit(game);
+      game.enemyBullets = game.enemyBullets.filter((b) => !b.dead);
+      game.drones = game.drones.filter((d) => !d.dead);
+    }
 
     // enemy shots hit the ship (during invulnerability the shot is just removed)
     for (const eb of game.enemyBullets) {
@@ -273,7 +394,7 @@
     return createGame();
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, laser, twin, twinRect, laserColumns, moonPos, LASER, MOON, BEND, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.

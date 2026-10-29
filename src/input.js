@@ -8,6 +8,25 @@
     special: { x: 338, y: 580, r: 30 },
     kaboom: { x: 280, y: 580, r: 26 },
   };
+  // LASER and TWIN: shown (and tappable) only while owned. They sit beside the classic buttons so that
+  // BUTTONS / layoutFor stay as they were. Both inputs queue presses for game.update (see takeActions).
+  const EXTRA_BUTTONS = { laser: { x: 418, y: 506, r: 26 }, twin: { x: 350, y: 516, r: 22 } };
+  const EXTRA_BELOW = { laser: { x: 410, y: -62, r: 22 }, twin: { x: 264, y: -36, r: 20 } }; // y: from the zone centre
+  const EXTRA_KEYS = { KeyK: "laser", KeyL: "twin" }; // used while keys.js has no binding for them
+  const actionQueue = { laser: false, twin: false };
+  function takeActions() {
+    const out = { ...actionQueue };
+    actionQueue.laser = false; actionQueue.twin = false;
+    return out;
+  }
+  function extraButtons(layout, swapped) {
+    const flip = (o) => (swapped ? { ...o, x: W - o.x } : { ...o });
+    const out = {};
+    for (const name of Object.keys(EXTRA_BUTTONS)) {
+      out[name] = layout && layout.zoneH ? flip({ ...EXTRA_BELOW[name], y: H + layout.zoneH / 2 + EXTRA_BELOW[name].y }) : flip(EXTRA_BUTTONS[name]);
+    }
+    return out;
+  }
   const TRAY_H = 0; // no tray: the buttons float over the playfield
   const PLAY_H = H;
   const PAUSE_BUTTON = { x: W - 44, y: 5, w: 38, h: 22 }; // in the top bar
@@ -116,6 +135,7 @@
     const pressed = { special: false, kaboom: false };
     let layout = null; // from layoutFor(): buttons and an optional D-pad; null = the classic overlay
     let pad = { id: null, x: 0, y: 0 }; // the finger on the D-pad
+    let owned = { laser: false, twin: false }; // set by the renderer each frame from the game
 
     const reset = () => {
       held.clear();
@@ -130,12 +150,21 @@
       setLayout(l) { layout = l; swapped = !!(l && l.leftHanded); reset(); },
       layout: () => layout,
       buttons,
+      setOwned(o) { owned = { laser: !!(o && o.laser), twin: !!(o && o.twin) }; },
+      // the LASER / TWIN buttons that are owned right now
+      extraButtons() {
+        const all = extraButtons(layout, layout ? layout.leftHanded : swapped), out = {};
+        for (const name of Object.keys(all)) if (owned[name]) out[name] = all[name];
+        return out;
+      },
       start(id, x, y) {
         const S = root.BBSkills;
         if (S && S.picker && S.pickerTap(S.game, x, y)) return; // a tap while the picker is open only picks
         const d = layout && layout.dpad && dpadVector(layout.dpad, x, y);
         if (d && pad.id === null) { pad = { id, x: d.x, y: d.y }; return; }
         if ((x < W / 2) !== swapped) { if (!(layout && layout.dpad)) stick.start(id, x, y); return; } // with a D-pad there is no floating stick
+        const extra = buttonAt(x, y, this.extraButtons());
+        if (extra) { actionQueue[extra] = true; return; }
         const name = buttonAt(x, y, buttons());
         if (!name) return;
         held.set(id, name);
@@ -196,6 +225,7 @@
         const S = root.BBSkills;
         if (S && S.picker && S.pickerKey(S.game, code)) return true; // the skill picker owns the keys while open
         const action = keys.actionFor(code);
+        if (!action && EXTRA_KEYS[code]) { actionQueue[EXTRA_KEYS[code]] = true; return true; }
         if (HELD_ACTIONS.includes(action)) { down[action] = true; return true; }
         if (PRESS_ACTIONS.includes(action)) { pressed[action] = true; return true; }
         return false;
@@ -572,6 +602,7 @@
   root.BBInput = {
     createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
     STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
+    EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
