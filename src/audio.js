@@ -4,49 +4,61 @@
 // vibrate or the DOM is missing, and no sound starts before unlock() runs from a user gesture.
 (function (root) {
   const VOICE_CAP = 12; // sound effects playing at once
-  const STEP = 10, VOLUME_DEFAULTS = { musicVolume: 70, effectsVolume: 80 };
+  const STEP = 10, VOLUME_DEFAULTS = { musicVolume: 40, effectsVolume: 50 };
   const SHAKE_MS = 250, VIBRATE_MS = 80;
 
   // ---- sound effects: one definition per shot type and event, all different ----
   // wave: oscillator shape; f0 -> f1: pitch sweep in Hz; dur: seconds; vol: 0..1; tail: second voice (Hz ratio)
   const SOUNDS = {
-    shot: { wave: "square", f0: 880, f1: 440, dur: 0.07, vol: 0.18 },
-    special: { wave: "sawtooth", f0: 220, f1: 1100, dur: 0.28, vol: 0.28, ratio: 1.5 },
-    kaboom: { wave: "sawtooth", f0: 180, f1: 30, dur: 0.7, vol: 0.45, ratio: 0.5 },
-    explode: { wave: "sawtooth", f0: 260, f1: 50, dur: 0.22, vol: 0.28 },
+    shot: { wave: "square", f0: 880, f1: 440, dur: 0.07, vol: 0.07 },
+    special: { wave: "triangle", f0: 220, f1: 1100, dur: 0.28, vol: 0.28, ratio: 1.5 },
+    kaboom: { wave: "triangle", f0: 180, f1: 30, dur: 0.7, vol: 0.45, ratio: 0.5 },
+    explode: { wave: "triangle", f0: 260, f1: 50, dur: 0.22, vol: 0.28 },
     bossExplode: { wave: "square", f0: 200, f1: 25, dur: 0.9, vol: 0.45, ratio: 0.51 },
     hit: { wave: "square", f0: 440, f1: 70, dur: 0.4, vol: 0.4, ratio: 1.06 },
     shieldHit: { wave: "triangle", f0: 1200, f1: 600, dur: 0.18, vol: 0.3 },
     pickup: { wave: "square", f0: 660, f1: 1320, dur: 0.16, vol: 0.22, ratio: 2 },
     extraLife: { wave: "triangle", f0: 523, f1: 1568, dur: 0.5, vol: 0.32, ratio: 1.25 },
     waveClear: { wave: "triangle", f0: 392, f1: 784, dur: 0.6, vol: 0.3, ratio: 1.5 },
-    gameOver: { wave: "sawtooth", f0: 300, f1: 40, dur: 1.4, vol: 0.4, ratio: 0.75 },
+    gameOver: { wave: "triangle", f0: 300, f1: 40, dur: 1.4, vol: 0.4, ratio: 0.75 },
     click: { wave: "square", f0: 1000, f1: 1000, dur: 0.03, vol: 0.12 },
   };
   const SOUND_IDS = Object.keys(SOUNDS);
 
-  // ---- music: 16 bars per loop, 8 eighth notes per bar (semitones above the bar's chord root, null = rest) ----
-  // Motifs stay on the minor pentatonic scale, so they sound right over every chord root.
+  // ---- music: 16 bars per loop, 8 eighth notes per bar ----
+  // Every note sits on the key's major or natural-minor scale. A bar has a bass (semitones above the key's tonic)
+  // and a lead (semitones above that bass, null = rest). Chord loops are scale degrees: I-V-vi-IV (play),
+  // I-vi-IV-V (title), i-VI-III-VII (boss). Motifs are scale-degree steps above the chord root (7 = an octave).
+  const SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
   const MOTIFS = {
-    A: [12, null, 15, 17, 19, null, 17, 15],
-    B: [16 + 3, null, 19, 22, 24, null, 22, 19],
-    C: [17, 15, 12, 15, 17, 19, 22, 19],
-    D: [19, null, 17, 15, 12, null, null, null],
-    E: [24, 22, 19, 22, 24, 27, 24, 22],
-    F: [12, 12, null, 15, 12, null, 17, 15],
-    G: [19, 19, 22, 19, 17, 17, 15, 12],
+    A: [7, null, 9, 11, 13, null, 11, 9],
+    B: [9, null, 11, 13, 14, null, 13, 11],
+    C: [11, 9, 7, 9, 11, 13, 14, 13],
+    D: [13, null, 11, 9, 7, null, null, null],
+    E: [14, 13, 11, 13, 14, 16, 14, 13],
+    F: [7, 7, null, 9, 7, null, 11, 9],
+    G: [11, 11, 13, 11, 9, 9, 7, 7],
   };
   const THEME_SPECS = {
-    title: { step: 0.17, root: 57, lead: "triangle", bassWave: "square", bassEvery: 2, chords: [0, -4, 3, -2], form: "ABACABCDABACBBCD" },
-    play: { step: 0.115, root: 52, lead: "square", bassWave: "triangle", bassEvery: 1, chords: [0, 0, -4, -2], form: "FGFEFGCEFGFEBGDE" },
-    boss: { step: 0.095, root: 45, lead: "sawtooth", bassWave: "square", bassEvery: 1, chords: [0, 1, 0, -2], form: "EFEGEFGEEFEGCGEE" },
+    title: { step: 0.17, root: 57, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 2, chords: [0, 5, 3, 4], form: "ABACABCDABACBBCD" },
+    play: { step: 0.115, root: 52, mode: "major", lead: "triangle", bassWave: "triangle", bassEvery: 1, chords: [0, 4, 5, 3], form: "FGFEFGCEFGFEBGDE" },
+    boss: { step: 0.095, root: 45, mode: "minor", lead: "triangle", bassWave: "triangle", bassEvery: 1, chords: [0, 5, 2, 6], form: "EFEGEFGEEFEGCGEE" },
   };
+  const degreeNote = (scale, d) => scale[d % 7] + 12 * Math.floor(d / 7);
   function buildTheme(spec) {
-    const bars = [];
+    const scale = SCALES[spec.mode], bars = [];
     for (let i = 0; i < 16; i++) {
-      bars.push({ bass: spec.chords[i % 4], lead: MOTIFS[spec.form[i]].slice() });
+      const chord = spec.chords[i % 4], bass = scale[chord];
+      const lead = MOTIFS[spec.form[i]].map((m) => {
+        if (m === null) return null;
+        let d = chord + m, n = degreeNote(scale, d);
+        // never a semitone from the bass sounding under it: step up one scale degree
+        while ([1, 11].includes((n - bass) % 12)) n = degreeNote(scale, ++d);
+        return n - bass;
+      });
+      bars.push({ bass, lead });
     }
-    return { step: spec.step, root: spec.root, lead: spec.lead, bassWave: spec.bassWave, bassEvery: spec.bassEvery, bars };
+    return { step: spec.step, root: spec.root, mode: spec.mode, lead: spec.lead, bassWave: spec.bassWave, bassEvery: spec.bassEvery, bars };
   }
   const THEMES = {};
   for (const k of Object.keys(THEME_SPECS)) THEMES[k] = buildTheme(THEME_SPECS[k]);
@@ -59,11 +71,11 @@
 
   // ---- presets: switches plus volumes ----
   const PRESETS = {
-    "All on": { music: true, sounds: true, musicVolume: 70, effectsVolume: 80 },
-    "Music only": { music: true, sounds: false, musicVolume: 70, effectsVolume: 80 },
-    "Effects only": { music: false, sounds: true, musicVolume: 70, effectsVolume: 80 },
+    "All on": { music: true, sounds: true, musicVolume: 40, effectsVolume: 50 },
+    "Music only": { music: true, sounds: false, musicVolume: 40, effectsVolume: 50 },
+    "Effects only": { music: false, sounds: true, musicVolume: 40, effectsVolume: 50 },
     "Quiet": { music: true, sounds: true, musicVolume: 30, effectsVolume: 30 },
-    "Silent": { music: false, sounds: false, musicVolume: 70, effectsVolume: 80 },
+    "Silent": { music: false, sounds: false, musicVolume: 40, effectsVolume: 50 },
   };
   const PRESET_NAMES = Object.keys(PRESETS);
 
@@ -86,7 +98,7 @@
       effectsVolume: Number.isFinite(stored.effectsVolume) ? clampVolume(stored.effectsVolume) : VOLUME_DEFAULTS.effectsVolume,
     };
     const on = (name) => (settings ? settings.get(name) : true);
-    let ctx = null, master = null, musicGain = null, sfxGain = null, failed = false;
+    let ctx = null, master = null, musicGain = null, sfxGain = null, sfxFilter = null, leadFilter = null, failed = false;
     let voices = []; // end times of the effects still sounding
     const music = { theme: "title", world: 1, bar: 0, step: 0, next: 0, playing: false };
 
@@ -116,7 +128,16 @@
           ctx = factory ? factory() : null;
           if (!ctx) { failed = true; return false; }
           master = ctx.createGain(); musicGain = ctx.createGain(); sfxGain = ctx.createGain();
-          musicGain.connect(master); sfxGain.connect(master); master.connect(ctx.destination);
+          const lowpass = (hz) => { const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = hz; return f; };
+          const comp = ctx.createDynamicsCompressor(); // gentle master compressor
+          comp.threshold.value = -18; comp.knee.value = 24; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.25;
+          sfxFilter = lowpass(4000); sfxFilter.connect(sfxGain);
+          leadFilter = lowpass(2500); leadFilter.connect(musicGain);
+          // short quiet echo on the lead, about 25 % wet
+          const delay = ctx.createDelay(1), feedback = ctx.createGain(), wet = ctx.createGain();
+          delay.delayTime.value = 0.18; feedback.gain.value = 0.3; wet.gain.value = 0.25;
+          leadFilter.connect(delay); delay.connect(feedback); feedback.connect(delay); delay.connect(wet); wet.connect(musicGain);
+          musicGain.connect(master); sfxGain.connect(master); master.connect(comp); comp.connect(ctx.destination);
           refresh();
         }
         if (ctx.state === "suspended" && typeof ctx.resume === "function") { const p = ctx.resume(); if (p && p.catch) p.catch(() => {}); }
@@ -124,15 +145,19 @@
       } catch (e) { ctx = null; failed = true; return false; }
     }
 
-    function tone(dest, wave, f0, f1, start, dur, level) {
+    // every voice fades in from 0 over 7 ms, decays, fades out to 0 over 15 ms, and stops only after that: no clicks
+    const ATTACK = 0.007, RELEASE = 0.015;
+    function tone(dest, wave, f0, f1, start, dur, level, tail) {
       const osc = ctx.createOscillator(), g = ctx.createGain();
       osc.type = wave;
       osc.frequency.setValueAtTime(f0, start);
       if (f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), start + dur);
-      g.gain.setValueAtTime(level, start);
-      g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      g.gain.setValueAtTime(0, start);
+      g.gain.linearRampToValueAtTime(level, start + ATTACK);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0001, level * (tail === undefined ? 0.05 : tail)), start + dur - RELEASE);
+      g.gain.linearRampToValueAtTime(0, start + dur);
       osc.connect(g); g.connect(dest);
-      osc.start(start); osc.stop(start + dur + 0.02);
+      osc.start(start); osc.stop(start + dur + 0.005);
     }
 
     // plays a sound effect; false when it was skipped (no audio yet, unknown id, switched off, voice cap)
@@ -143,9 +168,9 @@
         const now = ctx.currentTime || 0;
         voices = voices.filter((end) => end > now);
         if (voices.length >= VOICE_CAP) return false;
-        tone(sfxGain, def.wave, def.f0, def.f1, now, def.dur, def.vol);
-        if (def.ratio) tone(sfxGain, def.wave, def.f0 * def.ratio, def.f1 * def.ratio, now, def.dur, def.vol * 0.6);
-        voices.push(now + def.dur + 0.02);
+        tone(sfxFilter, def.wave, def.f0, def.f1, now, def.dur, def.vol);
+        if (def.ratio) tone(sfxFilter, def.wave, def.f0 * def.ratio, def.f1 * def.ratio, now, def.dur, def.vol * 0.6);
+        voices.push(now + def.dur + 0.005);
         return true;
       } catch (e) { return false; }
     }
@@ -168,8 +193,9 @@
         while (music.next < now + 0.25) {
           const bar = theme.bars[music.bar], t = music.next, len = theme.step;
           const lead = bar.lead[music.step];
-          if (lead !== null) { tone(musicGain, theme.lead, midiHz(theme.root + 12 + shift + bar.bass + lead), midiHz(theme.root + 12 + shift + bar.bass + lead), t, len * 0.9, 0.12); n++; }
-          if (music.step % theme.bassEvery === 0) { tone(musicGain, theme.bassWave, midiHz(theme.root - 12 + shift + bar.bass), midiHz(theme.root - 12 + shift + bar.bass), t, len * 1.6, 0.16); n++; }
+          const keyNote = theme.root + shift + bar.bass;
+          if (lead !== null) { const hz = midiHz(keyNote + 12 + lead); tone(leadFilter, theme.lead, hz, hz, t, len * 0.8, 0.1, 0.6); n++; }
+          if (music.step % theme.bassEvery === 0) { const hz = midiHz(keyNote - 12); tone(musicGain, theme.bassWave, hz, hz, t, len * theme.bassEvery * 0.85, 0.14, 0.6); n++; }
           music.next += len;
           if (++music.step >= 8) { music.step = 0; music.bar = (music.bar + 1) % theme.bars.length; }
         }
@@ -292,7 +318,7 @@
   const speakerHit = (x, y) => Math.hypot(x - SPEAKER.x, y - SPEAKER.y) <= SPEAKER.r + 4;
 
   root.BBAudio = {
-    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, SOUNDS, SOUND_IDS, THEMES, MOTIFS, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
+    SPEAKER, speakerHit, VOICE_CAP, STEP, VOLUME_DEFAULTS, SHAKE_MS, SOUNDS, SOUND_IDS, THEMES, MOTIFS, SCALES, WORLD_SHIFT, WAVES_PER_WORLD, PRESETS, PRESET_NAMES,
     worldOf, transposeFor, midiHz, createAudio, createHaptics,
   };
 })(globalThis);
