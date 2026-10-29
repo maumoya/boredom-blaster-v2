@@ -2,7 +2,10 @@
 // the tests load it in Node and read globalThis.BB.
 (function (root) {
   const W = 480, H = 640;
-  const SHIP = { w: 28, h: 20, speed: 280, y: H - 50 };
+  const TRAY_H = 120; // bottom controls tray, off the playfield
+  const PLAY_H = H - TRAY_H;
+  const HUD_H = 64; // top bar
+  const SHIP = { w: 28, h: 20, speed: 280, y: PLAY_H - 50 };
   const BULLET = { w: 4, h: 12, speed: 520, cooldown: 0.25 };
   const DRONE = { w: 28, h: 20, gapX: 44, gapY: 36, points: 10 };
   const SHIP_MIN_Y = H * 0.55; // the ship lives in the lower 45% of the screen
@@ -29,7 +32,7 @@
     game.drones = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        game.drones.push(E().createEnemy(game, "drone", left + c * DRONE.gapX, 50 + r * DRONE.gapY));
+        game.drones.push(E().createEnemy(game, "drone", left + c * DRONE.gapX, HUD_H + 10 + r * DRONE.gapY));
       }
     }
     game.drones.push(...E().spawnEnemies(game, script));
@@ -149,7 +152,7 @@
     input = input || {};
     const move = moveVector(input);
     game.ship.x = Math.max(0, Math.min(W - game.ship.w, game.ship.x + move.x * SHIP.speed * dt));
-    game.ship.y = Math.max(SHIP_MIN_Y, Math.min(H - game.ship.h, game.ship.y + move.y * SHIP.speed * dt));
+    game.ship.y = Math.max(SHIP_MIN_Y, Math.min(PLAY_H - game.ship.h, game.ship.y + move.y * SHIP.speed * dt));
     game.cooldown = Math.max(0, game.cooldown - dt);
     game.specialCooldown = Math.max(0, game.specialCooldown - dt);
     game.invuln = Math.max(0, game.invuln - dt);
@@ -159,6 +162,7 @@
 
     E().updateEnemies(game, dt);
     E().moveBullets(game, dt);
+    game.enemyBullets = game.enemyBullets.filter((b) => b.y < PLAY_H); // shots stop at the tray
     for (const b of game.bullets) b.y -= (b.pierce ? SPECIAL.speed : BULLET.speed) * dt;
     game.bullets = game.bullets.filter((b) => b.y + b.h > 0);
 
@@ -213,7 +217,7 @@
     for (const d of game.drones) {
       if (R().hitEscort(game, d, hit)) { if (!d.boss) d.dead = true; continue; }
       const touch = game.invuln <= 0 && hit(d, game.ship);
-      if (touch || (isFormation(d) && d.y + d.h >= H)) {
+      if (touch || (isFormation(d) && d.y + d.h >= PLAY_H)) {
         if (!d.boss) d.dead = true;
         if (game.invuln <= 0 && game.status === "playing" && !R().absorbHit(game)) loseLife(game);
         if (d.boss) game.invuln = Math.max(game.invuln, BOSS_TOUCH_INVULN);
@@ -233,7 +237,7 @@
     return createGame();
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, W, H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, BULLET, DRONE, START_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, BULLET, DRONE, START_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.

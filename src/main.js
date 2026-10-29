@@ -67,6 +67,7 @@
     const isMouse = e.pointerType === "mouse";
     if (!isMouse) touchSeen = true;
     if (handleScreenClick(x, y)) return;
+    if (BBInput.pauseHit(x, y)) { menu.toggle(); return; } // the pause icon in the top bar
     canvas.setPointerCapture(e.pointerId);
     if (isMouse) mouse.down(x, y, e.button);
     else touch.start(e.pointerId, x, y);
@@ -107,7 +108,7 @@
     BB.update(game, dt, input);
     if (!game.paused) renderer.update(dt, game);
     if (game.score > best) best = store.saveBest(game.score);
-    renderer.draw({ game, menu, best, touch, touchSeen, time: now / 1000 });
+    renderer.draw({ game, menu, best, touch, touchSeen, firing: keyboard.fire(), time: now / 1000 });
     requestAnimationFrame(frame);
   }
   function start() {

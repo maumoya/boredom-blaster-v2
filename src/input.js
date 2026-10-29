@@ -4,10 +4,15 @@
   const W = 480, H = 640;
   const STICK = { max: 60, dead: 8 }; // px, in canvas coordinates
   const BUTTONS = {
-    fire: { x: 400, y: 570, r: 42 },
-    special: { x: 320, y: 595, r: 30 },
-    kaboom: { x: 415, y: 480, r: 30 },
+    fire: { x: 418, y: 574, r: 38 },
+    special: { x: 338, y: 580, r: 30 },
+    kaboom: { x: 280, y: 580, r: 26 },
   };
+  const TRAY_H = 120; // the controls tray: the bottom 120 px, off the playfield
+  const PLAY_H = H - TRAY_H;
+  const PAUSE_BUTTON = { x: W - 44, y: 5, w: 38, h: 22 }; // in the top bar
+  const pauseHit = (x, y) => x >= PAUSE_BUTTON.x - 6 && x <= PAUSE_BUTTON.x + PAUSE_BUTTON.w + 6 &&
+    y >= PAUSE_BUTTON.y - 4 && y <= PAUSE_BUTTON.y + PAUSE_BUTTON.h + 8;
   const HIT_PAD = 10; // generous thumb target around each button
 
   // Floating stick: appears where the thumb lands; the center trails a finger dragged past the clamp.
@@ -97,6 +102,7 @@
         held.delete(id);
       },
       axes() { return { x: stick.state.x, y: stick.state.y }; },
+      isHeld(name) { return [...held.values()].includes(name); },
       fire() { return [...held.values()].includes("fire"); },
       takePressed() {
         const out = { ...pressed };
@@ -221,7 +227,7 @@
   }
 
   root.BBInput = {
-    STICK, BUTTONS, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
+    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
     createStore, createMenu, buttonAt, buttonsFor, mirrorButtons,
   };
 })(globalThis);

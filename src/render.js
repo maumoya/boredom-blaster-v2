@@ -3,7 +3,13 @@
 // Plain script; main.js calls BBRender.createRenderer(ctx, assets). Tests drive it with a stub canvas.
 (function (root) {
   const W = 480, H = 640;
-  const HUD_H = 56;
+  const HUD_H = 64; // two-row top bar
+  const TRAY_Y = H - 120; // the controls tray starts here
+  const NEBULA = [ // drifting colour clouds: x, y, radius, colour, drift speed
+    { x: 0.2, y: 0.25, r: 190, c: "90,60,200", v: 6 }, { x: 0.8, y: 0.55, r: 220, c: "30,120,200", v: 4 },
+    { x: 0.5, y: 0.9, r: 200, c: "190,50,140", v: 5 },
+  ];
+  const SHOCK = { life: 0.45, radius: 46, bigRadius: 110 };
   const RANK_COLOR = { bronze: "#c8843c", silver: "#cfd6e0", gold: "#ffd23c" };
   const RANK_SPRITE = { bronze: "capsuleBronze", silver: "capsuleSilver", gold: "capsuleGold", rainbow: "capsuleRainbow" };
   const SPECIES_COLOR = {
@@ -36,6 +42,8 @@
 
   function createRenderer(ctx, assets) {
     const particles = [];
+    const rings = []; // explosion shockwaves
+    const ui = root.BBUI.createUI(ctx);
     const flash = { time: 0 };
     let prev = { drones: [], lives: null, wave: null };
     let scroll = 0;
@@ -83,12 +91,14 @@
 
     // ---- effects state ----
     function explode(x, y, big) {
-      const n = big ? 36 : 12;
+      const n = big ? 64 : 22;
+      rings.push({ x, y, life: SHOCK.life, max: SHOCK.life, radius: big ? SHOCK.bigRadius : SHOCK.radius });
       for (let i = 0; i < n && particles.length < MAX_PARTICLES; i++) {
-        const a = (i / n) * Math.PI * 2 + i * 0.7, v = (big ? 140 : 90) * (0.4 + ((i * 37) % 10) / 10);
+        const a = (i / n) * Math.PI * 2 + i * 0.7, v = (big ? 220 : 140) * (0.4 + ((i * 37) % 10) / 10);
+        const life = 0.5 + ((i * 13) % 5) * 0.08;
         particles.push({
-          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.6, max: 0.6,
-          color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? "#fd4" : "#f74", size: big ? 4 : 3,
+          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life,
+          color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? "#fd4" : "#f74", size: (big ? 6 : 4) + (i % 3),
         });
       }
     }
@@ -105,12 +115,60 @@
       flash.time = Math.max(0, flash.time - dt);
       for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
       for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
+      for (const r of rings) r.life -= dt;
+      for (let i = rings.length - 1; i >= 0; i--) if (rings[i].life <= 0) rings.splice(i, 1);
     }
 
     // ---- scene ----
+    // soft colour clouds that drift down and sway; flat translucent discs when gradients are missing
+    function drawNebula() {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      NEBULA.forEach((n, i) => {
+        const x = n.x * W + Math.sin(scroll * 0.15 + i * 2) * 40;
+        const y = ((n.y * H + scroll * n.v) % (H + 2 * n.r)) - n.r;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, n.r);
+        if (g && typeof g.addColorStop === "function") {
+          g.addColorStop(0, "rgba(" + n.c + ",0.42)");
+          g.addColorStop(1, "rgba(" + n.c + ",0)");
+          ctx.fillStyle = g;
+          ctx.fillRect(x - n.r, y - n.r, n.r * 2, n.r * 2);
+        } else circle(x, y, n.r * 0.7, "rgba(" + n.c + ",0.18)");
+      });
+      ctx.restore();
+    }
+
+    function drawShockwaves() {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const r of rings) {
+        const k = 1 - r.life / r.max;
+        ctx.globalAlpha = Math.max(0, 1 - k);
+        circle(r.x, r.y, r.radius * k, null, "#fff", 3 * (1 - k) + 1);
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // layered engine flame: outer orange teardrop, inner white-yellow core, flickering with time
+    function drawEngineFlame(cx, baseY, t) {
+      const f = 0.8 + 0.2 * Math.sin(t * 40) + 0.1 * Math.sin(t * 23);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const [w, len, color] of [[7, 22, "rgba(255,120,30,0.8)"], [4, 14, "rgba(255,230,120,0.95)"]]) {
+        ctx.beginPath();
+        ctx.moveTo(cx - w, baseY);
+        ctx.quadraticCurveTo(cx, baseY + len * 1.4 * f, cx + w, baseY);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
     function drawBackground() {
       ctx.fillStyle = "#050514";
       ctx.fillRect(0, 0, W, H);
+      drawNebula();
       stars.forEach((layer, li) => {
         const L = STAR_LAYERS[li];
         for (const s of layer) {
@@ -166,6 +224,7 @@
       const blink = game.invuln > 0 && Math.floor(game.invuln * 10) % 2 === 0;
       if (game.status !== "playing" || blink) return;
       const flicker = 0.8 + 0.2 * Math.sin(t * 40);
+      drawEngineFlame(cx, s.y + s.h - 2, t);
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
       const shipFallback = () => {
         ctx.fillStyle = "#4df";
@@ -202,9 +261,10 @@
     }
 
     // ---- HUD ----
-    function pips(label, x, y, max, filled, color) {
-      text(label, x, y, 11, "#9ab");
-      for (let i = 0; i < max; i++) circle(x + 36 + i * 11, y - 4, 4, i < filled ? color : "rgba(255,255,255,0.2)");
+    // an icon followed by a row of pips, filled up to `filled`
+    function iconBar(icon, x, y, max, filled, color) {
+      ui.icon(icon, x + 7, y, 16, color);
+      for (let i = 0; i < max; i++) circle(x + 22 + i * 10, y, 4, i < filled ? color : "rgba(255,255,255,0.2)");
     }
 
     function drawBossBar(game) {
@@ -219,53 +279,68 @@
 
     function drawHud(view) {
       const { game } = view, t = view.time || 0;
-      panel(0, 0, W, HUD_H, "rgba(5,10,30,0.85)", "#2a4a7a");
-      text("SCORE", 12, 20, 11, "#9ab");
-      text(String(game.score), 12, 44, 22, "#fff");
-      text("WAVE " + game.wave, W / 2, 24, 16, "#fff", "center");
-      text("BEST " + (view.best || 0), W / 2, 44, 13, "#fd4", "center");
-      const R = root.BB.R();
-      for (let i = 0; i < game.lives; i++) {
-        sprite("lifeIcon", W - 24 - i * 28, 22, 22, () => circle(W - 24 - i * 28, 22, 8, "#4df"));
-      }
-      const y0 = HUD_H + 36 + (game.drones.some((d) => d.boss) ? 18 : 0); // pushed down under the boss bar
-      pips("WPN", 12, y0, R.WEAPON.maxLevel, game.weaponLevel, RANK_COLOR.bronze);
-      pips("SHD", 12, y0 + 16, R.SHIELD.hits, game.shield, RANK_COLOR.silver);
-      pips("ESC", 12, y0 + 32, R.ESCORT.max, game.escorts.length, RANK_COLOR.gold);
-      if (game.superStar > 0) {
+      const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
+      ui.panel(0, 0, W, HUD_H, { radius: 0, stroke: "#2a4a7a" });
+      // row 1: lives, wave, best, pause
+      ui.icon("heart", 18, 15, 20, "#f45");
+      text("×" + Math.max(0, game.lives), 32, 21, 16, "#fff");
+      text("WAVE " + game.wave, 130, 21, 15, "#fff", "center");
+      text("BEST " + (view.best || 0), 260, 21, 13, "#fd4", "center");
+      const paused = view.menu && view.menu.screen === "pause";
+      ui.button(P.x, P.y, P.w, P.h, "", paused ? "pressed" : "idle");
+      ui.icon("pause", P.x + P.w / 2, P.y + P.h / 2 + (paused ? 2 : 0), 16, "#fff");
+      // row 2: score counter and the weapon / shield / escort bars
+      text("SCORE", 10, 43, 9, "#9ab");
+      text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
+      iconBar("weapon", 150, 48, R.WEAPON.maxLevel, game.weaponLevel, RANK_COLOR.bronze);
+      iconBar("shield", 252, 48, R.SHIELD.hits, game.shield, RANK_COLOR.silver);
+      iconBar("escort", 340, 48, R.ESCORT.max, game.escorts.length, RANK_COLOR.gold);
+      if (game.superStar > 0) { // rainbow timer along the bottom edge of the bar
         ctx.fillStyle = rainbow(t);
-        ctx.fillRect(12, y0 + 40, 100 * (game.superStar / R.SUPER_STAR.duration), 6);
-        text("SUPER " + game.superStar.toFixed(1) + "s", 118, y0 + 46, 11, "#fff");
+        ctx.fillRect(6, HUD_H - 6, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
       }
       drawBossBar(game);
     }
 
     function drawControls(view) {
-      const touch = view.touch;
-      if (!touch) return;
-      const st = touch.stick.state, B = touch.buttons(), game = view.game, BB = root.BB;
-      if (st.active) {
-        circle(st.cx, st.cy, root.BBInput.STICK.max, "rgba(255,255,255,0.08)", "rgba(255,255,255,0.3)");
-        circle(st.kx, st.ky, 22, "rgba(77,221,255,0.4)");
-      }
-      ctx.globalAlpha = view.touchSeen ? 1 : 0.35;
-      const label = (s, b) => text(s, b.x, b.y + 4, 12, "rgba(255,255,255,0.8)", "center");
-      circle(B.fire.x, B.fire.y, B.fire.r, "rgba(255,80,80,0.3)", "rgba(255,120,120,0.6)");
-      label("FIRE", B.fire);
-      circle(B.special.x, B.special.y, B.special.r, "rgba(77,221,255,0.25)", "rgba(77,221,255,0.4)");
+      const touch = view.touch, game = view.game, BB = root.BB, IN = root.BBInput;
+      const B = touch ? touch.buttons() : IN.buttonsFor(!!(view.menu && view.menu.leftHanded));
+      const held = (name) => !!touch && touch.isHeld(name);
+      ui.panel(0, TRAY_Y, W, H - TRAY_Y, { radius: 0, stroke: "#2a4a7a" });
+
+      const firing = held("fire") || !!view.firing;
+      ui.iconButton(B.fire.x, B.fire.y, B.fire.r, "fire", { state: firing ? "pressed" : "idle", color: "#ff7a5a", label: "FIRE" });
+
       const ready = 1 - game.specialCooldown / BB.SPECIAL.cooldown;
-      ctx.beginPath();
-      ctx.arc(B.special.x, B.special.y, B.special.r, -Math.PI / 2, -Math.PI / 2 + ready * Math.PI * 2);
+      const justFired = game.specialCooldown > BB.SPECIAL.cooldown - 0.15;
+      const specState = held("special") || justFired ? "pressed" : "idle";
+      ui.iconButton(B.special.x, B.special.y, B.special.r, "spec", { state: specState, color: "#4df", label: "SPEC" });
+      ctx.beginPath(); // cooldown ring, full and bright when ready
+      ctx.arc(B.special.x, B.special.y, B.special.r + 5, -Math.PI / 2, -Math.PI / 2 + Math.max(0, Math.min(1, ready)) * Math.PI * 2);
       ctx.strokeStyle = ready >= 1 ? "#4df" : "rgba(255,255,255,0.7)";
       ctx.lineWidth = 4;
       ctx.stroke();
-      label("SPEC", B.special);
-      circle(B.kaboom.x, B.kaboom.y, B.kaboom.r, "rgba(255,200,60,0.25)", "rgba(255,200,60,0.5)");
-      label("BOOM", B.kaboom);
+
+      const empty = game.kaboomCharges <= 0;
+      ui.iconButton(B.kaboom.x, B.kaboom.y, B.kaboom.r, "boom", {
+        state: empty ? "disabled" : held("kaboom") ? "pressed" : "idle", color: "#fd4", label: "BOOM",
+      });
       for (let i = 0; i < BB.KABOOM.maxCharges; i++) {
-        circle(B.kaboom.x - 12 + i * 12, B.kaboom.y + B.kaboom.r + 10, 4, i < game.kaboomCharges ? "#fd4" : "rgba(255,255,255,0.2)");
+        circle(B.kaboom.x - 12 + i * 12, B.kaboom.y + B.kaboom.r + 9, 4, i < game.kaboomCharges ? "#fd4" : "rgba(255,255,255,0.2)");
       }
-      ctx.globalAlpha = 1;
+      drawStick(touch);
+    }
+
+    // floating stick: dark base ring and a glossy knob
+    function drawStick(touch) {
+      if (!touch) return;
+      const st = touch.stick.state;
+      if (!st.active) return;
+      circle(st.cx, st.cy, root.BBInput.STICK.max, "rgba(20,40,90,0.35)", "rgba(160,200,255,0.5)", 3);
+      circle(st.cx, st.cy, root.BBInput.STICK.max * 0.55, null, "rgba(160,200,255,0.2)", 1);
+      circle(st.kx, st.ky + 2, 24, "rgba(0,0,20,0.4)");
+      circle(st.kx, st.ky, 24, "rgba(77,200,255,0.75)", "#bfeaff", 2);
+      circle(st.kx - 6, st.ky - 8, 8, "rgba(255,255,255,0.35)");
     }
 
     // ---- screens ----
@@ -276,21 +351,18 @@
 
     function drawPause(menu) {
       dim(0.65);
-      text("PAUSED", W / 2, 230, 36, "#fff", "center");
+      ui.title("PAUSED", W / 2, 230, 36);
       const L = root.BBInput.MENU_LAYOUT;
       menu.items().forEach((label, i) => {
-        const y = L.y + i * (L.h + L.gap), hot = i === menu.cursor;
-        const img = assets && assets.get(hot ? "buttonHot" : "button");
-        if (img) ctx.drawImage(img, L.x, y, L.w, L.h);
-        else panel(L.x, y, L.w, L.h, hot ? "#446" : "#223", hot ? "#fd4" : "#68a");
-        text(label, W / 2, y + L.h / 2 + 5, 15, hot ? "#000" : "#fff", "center");
+        const y = L.y + i * (L.h + L.gap);
+        ui.button(L.x, y, L.w, L.h, label, i === menu.cursor ? "hot" : "idle");
       });
     }
 
     function drawHowTo() {
       dim(0.82);
-      panel(40, 90, W - 80, 440, "rgba(10,20,50,0.9)", "#4df");
-      text("HOW TO PLAY", W / 2, 140, 28, "#4df", "center");
+      ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
+      ui.title("HOW TO PLAY", W / 2, 140, 28);
       HOW_TO.forEach((line, i) => text(line, W / 2, 190 + i * 32, 15, "#fff", "center"));
       text("Press Enter, P or tap to continue", W / 2, 500, 14, "#fd4", "center");
     }
@@ -298,7 +370,8 @@
     function drawGameOver(view) {
       const game = view.game;
       dim(0.5);
-      text("GAME OVER", W / 2, H / 2 - 10, 40, "#f55", "center");
+      ui.title("GAME OVER", W / 2, H / 2 - 10, 40, "#f55");
+      ui.stars(W / 2, H / 2 - 60, Math.min(3, Math.floor(game.wave / 3)), 3, 9);
       text("Score " + game.score, W / 2, H / 2 + 26, 20, "#fff", "center");
       text("Best " + (view.best || 0), W / 2, H / 2 + 52, 16, "#fd4", "center");
       text("Press Enter to restart", W / 2, H / 2 + 84, 18, "#4df", "center");
@@ -314,6 +387,7 @@
       for (const b of game.bullets) glowRect(b, b.pierce ? "special" : "bullet", b.pierce ? "#8ff" : "#6af");
       for (const b of game.enemyBullets) glowRect(b, "enemyBullet", "#f55");
       drawShip(game, t);
+      drawShockwaves();
       drawParticles();
       if (flash.time > 0) {
         ctx.fillStyle = "rgba(255,60,60," + (0.4 * flash.time / FLASH_TIME) + ")";
