@@ -7,8 +7,10 @@ T="$(cd "$(dirname "$0")/.." && pwd)"
 G="$HOME/BoredomBlaster"
 V="$(git -C "$G" rev-parse --short=7 main)"
 
-# rewards.js and enemies.js load themselves (enemies.js through document.write), so load them first
-LIST=$( { echo src/rewards.js; echo src/enemies.js; git -C "$G" show main:index.html | grep -o 'src/[A-Za-z0-9_]*\.js'; } | awk '!seen[$0]++')
+# Files that load themselves through document.write (enemies.js, skills.js, ...) never load from a
+# script inserted later, so list them first, found from the replace(..., "x.js") calls in src/
+SELF=$(git -C "$G" grep -h -o '"[A-Za-z0-9_]*\.js")' main -- src | grep -o '[A-Za-z0-9_]*\.js' | sed 's#^#src/#' || true)
+LIST=$( { echo src/rewards.js; echo "$SELF"; git -C "$G" show main:index.html | grep -o 'src/[A-Za-z0-9_]*\.js'; } | awk 'NF && !seen[$0]++')
 JSON=$(echo "$LIST" | sed 's/.*/"&"/' | paste -sd, -)
 
 for f in $(git -C "$G" ls-tree --name-only main src/); do git -C "$G" show "main:$f" > "$T/$f"; done
