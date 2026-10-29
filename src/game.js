@@ -11,6 +11,8 @@
   const START_LIVES = 3;
   const INVULN = 1.5;
 
+  const R = () => root.BBRewards; // src/rewards.js, loaded before the game is created
+
   function hit(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
@@ -38,18 +40,21 @@
       specialCooldown: 0, kills: 0, kaboomCharges: 0, paused: false,
       status: "playing", // "playing" | "over"
     };
+    R().initRewards(game);
     spawnWave(game);
     return game;
   }
 
   function shoot(game) {
     if (game.status !== "playing" || game.cooldown > 0) return false;
-    game.bullets.push({
-      x: game.ship.x + (game.ship.w - BULLET.w) / 2,
-      y: game.ship.y - BULLET.h,
-      w: BULLET.w, h: BULLET.h,
-    });
-    game.cooldown = BULLET.cooldown;
+    for (const dx of R().weaponShots(game.weaponLevel)) {
+      game.bullets.push({
+        x: game.ship.x + (game.ship.w - BULLET.w) / 2 + dx,
+        y: game.ship.y - BULLET.h,
+        w: BULLET.w, h: BULLET.h,
+      });
+    }
+    game.cooldown = BULLET.cooldown / R().fireRateMult(game);
     return true;
   }
 
@@ -65,9 +70,10 @@
     return true;
   }
 
-  function addKill(game) {
+  function addKill(game, drone) {
     game.score += DRONE.points;
     game.kills += 1;
+    if (drone) R().onKill(game, drone.x + drone.w / 2, drone.y);
     if (game.kills % KABOOM.killsPerCharge === 0) {
       game.kaboomCharges = Math.min(KABOOM.maxCharges, game.kaboomCharges + 1);
     }
@@ -94,6 +100,7 @@
   function loseLife(game) {
     game.lives -= 1;
     game.invuln = INVULN;
+    R().onLifeLost(game);
     if (game.lives <= 0) {
       game.lives = 0;
       game.status = "over";
@@ -121,6 +128,8 @@
     game.cooldown = Math.max(0, game.cooldown - dt);
     game.specialCooldown = Math.max(0, game.specialCooldown - dt);
     game.invuln = Math.max(0, game.invuln - dt);
+    R().updateTimers(game, dt);
+    R().updateCapsules(game, dt, hit, H);
     if (input.fire) shoot(game);
 
     for (const b of game.bullets) b.y -= (b.pierce ? SPECIAL.speed : BULLET.speed) * dt;
@@ -148,26 +157,27 @@
       if (b.pierce) { // the special shot passes through everything it touches
         game.drones = game.drones.filter((d) => {
           if (!hit(b, d)) return true;
-          addKill(game);
+          addKill(game, d);
           return false;
         });
         continue;
       }
       const i = game.drones.findIndex((d) => hit(b, d));
       if (i !== -1) {
-        game.drones.splice(i, 1);
+        const [dead] = game.drones.splice(i, 1);
         b.dead = true;
-        addKill(game);
+        addKill(game, dead);
       }
     }
     game.bullets = game.bullets.filter((b) => !b.dead);
 
     // drones reaching the ship or the floor cost a life and are removed
     for (const d of game.drones) {
+      if (R().hitEscort(game, d, hit)) { d.dead = true; continue; }
       const touch = game.invuln <= 0 && hit(d, game.ship);
       if (touch || d.y + d.h >= H) {
         d.dead = true;
-        if (game.invuln <= 0 && game.status === "playing") loseLife(game);
+        if (game.invuln <= 0 && game.status === "playing" && !R().absorbHit(game)) loseLife(game);
       }
     }
     game.drones = game.drones.filter((d) => !d.dead);
@@ -183,5 +193,5 @@
     return createGame();
   }
 
-  root.BB = { W, H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, BULLET, DRONE, START_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, W, H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, BULLET, DRONE, START_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);

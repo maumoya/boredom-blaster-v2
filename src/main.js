@@ -6,7 +6,7 @@
   canvas.width = BB.W;
   canvas.height = BB.H;
 
-  let game = BB.createGame();
+  let game; // created once src/rewards.js has loaded (see the end of this file)
   const keyboard = BBInput.createKeyboard();
   const touch = BBInput.createTouch();
   let touchSeen = false; // the on-screen buttons only show once a finger has been used
@@ -122,6 +122,65 @@
     ctx.globalAlpha = 1;
   }
 
+  const RANK_COLOR = { bronze: "#c8843c", silver: "#cfd6e0", gold: "#ffd23c" };
+
+  function rankColor(rank) {
+    if (rank !== "rainbow") return RANK_COLOR[rank];
+    return "hsl(" + Math.floor(performance.now() / 4) % 360 + ",90%,60%)";
+  }
+
+  // winged capsule: a coloured pill with a small wing on each side
+  function drawCapsule(c) {
+    const color = rankColor(c.rank), cy = c.y + c.h / 2;
+    ctx.fillStyle = color;
+    for (const side of [-1, 1]) {
+      const ex = side < 0 ? c.x : c.x + c.w;
+      ctx.beginPath();
+      ctx.moveTo(ex - side * 8, cy);
+      ctx.lineTo(ex + side * 4, c.y - 3);
+      ctx.lineTo(ex + side * 4, c.y + c.h + 3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillRect(c.x + 6, c.y, c.w - 12, c.h);
+    ctx.fillStyle = "#050514";
+    ctx.fillRect(c.x + c.w / 2 - 1, c.y + 3, 2, c.h - 6);
+  }
+
+  function drawEscort(e) {
+    ctx.fillStyle = "#8ff";
+    ctx.fillRect(e.x + 4, e.y, e.w - 8, e.h);
+    ctx.fillRect(e.x, e.y + 6, e.w, 4);
+  }
+
+  // HUD: weapon level pips, shield hits, escort count and the Super Star timer, under the top row
+  function drawRewardHud() {
+    const R = BB.R(), y = 44;
+    ctx.textAlign = "left";
+    ctx.font = "12px monospace";
+    ctx.fillStyle = "#fff";
+    ctx.fillText("WPN", 12, y);
+    for (let i = 0; i < R.WEAPON.maxLevel; i++) {
+      circle(52 + i * 11, y - 4, 4, i < game.weaponLevel ? RANK_COLOR.bronze : "rgba(255,255,255,0.2)");
+    }
+    ctx.fillStyle = "#fff";
+    ctx.fillText("SHD", 12, y + 16);
+    for (let i = 0; i < R.SHIELD.hits; i++) {
+      circle(52 + i * 11, y + 12, 4, i < game.shield ? RANK_COLOR.silver : "rgba(255,255,255,0.2)");
+    }
+    ctx.fillStyle = "#fff";
+    ctx.fillText("ESC", 12, y + 32);
+    for (let i = 0; i < R.ESCORT.max; i++) {
+      circle(52 + i * 11, y + 28, 4, i < game.escorts.length ? RANK_COLOR.gold : "rgba(255,255,255,0.2)");
+    }
+    if (game.superStar > 0) {
+      ctx.fillStyle = rankColor("rainbow");
+      ctx.fillRect(12, y + 40, 100 * (game.superStar / R.SUPER_STAR.duration), 6);
+      ctx.fillStyle = "#fff";
+      ctx.fillText("SUPER " + game.superStar.toFixed(1) + "s", 118, y + 46);
+    }
+  }
+
   function draw() {
     ctx.fillStyle = "#050514";
     ctx.fillRect(0, 0, BB.W, BB.H);
@@ -129,6 +188,8 @@
     for (const s of stars) ctx.fillRect(s.x, s.y, s.size, s.size);
 
     for (const d of game.drones) drawDrone(d);
+    for (const c of game.capsules) drawCapsule(c);
+    for (const e of game.escorts) drawEscort(e);
     ctx.fillStyle = "#ff6";
     for (const b of game.bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
     const blink = game.invuln > 0 && Math.floor(game.invuln * 10) % 2 === 0;
@@ -143,6 +204,7 @@
     ctx.textAlign = "right";
     ctx.fillText("LIVES " + game.lives, BB.W - 12, 24);
 
+    drawRewardHud();
     drawControls();
 
     if (game.paused) center("PAUSED", BB.H / 2, 40, "#fff");
@@ -161,6 +223,19 @@
     draw();
     requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+  function start() {
+    game = BB.createGame();
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+  // index.html only lists game.js, input.js and main.js, so main.js pulls rewards.js in itself
+  if (globalThis.BBRewards) start();
+  else {
+    const s = document.createElement("script");
+    s.src = "src/rewards.js";
+    s.onload = start;
+    s.onerror = () => console.error("Boredom Blaster: src/rewards.js failed to load");
+    document.head.appendChild(s);
+  }
   globalThis.__game = () => game; // handy for debugging in the console
 })();
