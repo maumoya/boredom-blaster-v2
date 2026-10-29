@@ -2,16 +2,17 @@
 // the tests load it in Node and read globalThis.BB.
 (function (root) {
   const W = 480, H = 640;
-  const TRAY_H = 120; // bottom controls tray, off the playfield
-  const PLAY_H = H - TRAY_H;
+  const TRAY_H = 0; // no tray: the controls float over the playfield
+  const PLAY_H = H;
   const HUD_H = 64; // top bar
   const SHIP = { w: 28, h: 20, speed: 280, y: PLAY_H - 50 };
   const BULLET = { w: 4, h: 12, speed: 520, cooldown: 0.25 };
   const DRONE = { w: 28, h: 20, gapX: 44, gapY: 36, points: 10 };
-  const SHIP_MIN_Y = H * 0.55; // the ship lives in the lower 45% of the screen
+  const SHIP_MIN_Y = HUD_H; // the ship goes anywhere below the top bar
   const SPECIAL = { w: 40, h: 16, speed: 420, cooldown: 6 };
   const KABOOM = { killsPerCharge: 10, maxCharges: 3, targets: 5 };
   const START_LIVES = 3;
+  const MAX_LIVES = 9;
   const INVULN = 1.5;
 
   const PIERCE_DAMAGE = 5; // the special shot hurts each enemy once, so mini-bosses take 5 of their HP
@@ -119,6 +120,12 @@
     return true;
   }
 
+  function addLife(game) {
+    if (game.lives >= MAX_LIVES) return false;
+    game.lives += 1;
+    return true;
+  }
+
   function togglePause(game) {
     if (game.status !== "playing") return false;
     game.paused = !game.paused;
@@ -162,7 +169,7 @@
 
     E().updateEnemies(game, dt);
     E().moveBullets(game, dt);
-    game.enemyBullets = game.enemyBullets.filter((b) => b.y < PLAY_H); // shots stop at the tray
+    game.enemyBullets = game.enemyBullets.filter((b) => b.y < PLAY_H); // shots stop at the bottom edge
     for (const b of game.bullets) b.y -= (b.pierce ? SPECIAL.speed : BULLET.speed) * dt;
     game.bullets = game.bullets.filter((b) => b.y + b.h > 0);
 
@@ -237,7 +244,7 @@
     return createGame();
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, BULLET, DRONE, START_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.

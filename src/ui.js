@@ -3,7 +3,7 @@
 // and works on a stub canvas (gradients may come back empty: flat colours are used then).
 (function (root) {
   const TAU = Math.PI * 2;
-  const ICONS = ["heart", "pause", "fire", "spec", "boom", "weapon", "shield", "escort", "star", "play"];
+  const ICONS = ["heart", "pause", "fire", "spec", "boom", "weapon", "shield", "escort", "star", "play", "gear"];
   const PALETTE = {
     idle: { top: "#5a7cc0", bottom: "#243a74", edge: "#9fc0ff", shadow: "#0a1230" },
     hot: { top: "#ffe27a", bottom: "#d8861c", edge: "#fff2b0", shadow: "#4a2a04" },
@@ -186,6 +186,14 @@
           ctx.closePath(); ctx.fill(); break;
         case "star":
           starShape(cx, cy, s, color); break;
+        case "gear": // toothed wheel with a hole
+          for (let i = 0; i < 16; i++) {
+            const a0 = (i * TAU) / 16, rr = i % 2 ? s * 0.78 : s;
+            ctx.lineTo(cx + Math.cos(a0) * rr, cy + Math.sin(a0) * rr);
+          }
+          ctx.closePath();
+          ctx.moveTo(cx + s * 0.32, cy); ctx.arc(cx, cy, s * 0.32, 0, TAU);
+          ctx.fill("evenodd"); break;
         default:
           ctx.arc(cx, cy, s * 0.6, 0, TAU); ctx.fill();
       }

@@ -8,8 +8,8 @@
     special: { x: 338, y: 580, r: 30 },
     kaboom: { x: 280, y: 580, r: 26 },
   };
-  const TRAY_H = 120; // the controls tray: the bottom 120 px, off the playfield
-  const PLAY_H = H - TRAY_H;
+  const TRAY_H = 0; // no tray: the buttons float over the playfield
+  const PLAY_H = H;
   const PAUSE_BUTTON = { x: W - 44, y: 5, w: 38, h: 22 }; // in the top bar
   const pauseHit = (x, y) => x >= PAUSE_BUTTON.x - 6 && x <= PAUSE_BUTTON.x + PAUSE_BUTTON.w + 6 &&
     y >= PAUSE_BUTTON.y - 4 && y <= PAUSE_BUTTON.y + PAUSE_BUTTON.h + 8;
@@ -130,25 +130,26 @@
     };
   }
 
-  const KEYS = {
-    ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
-    ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down",
-    Space: "fire",
-  };
-  const KEY_PRESSES = { KeyX: "special", KeyB: "kaboom", KeyP: "pause", Escape: "pause" };
+  const HELD_ACTIONS = ["left", "right", "up", "down", "fire"];
+  const PRESS_ACTIONS = ["special", "kaboom", "pause", "mute"];
 
-  function createKeyboard() {
+  // keys: a BBKeys.createKeys() object; without one the default bindings are used
+  function createKeyboard(keys) {
+    keys = keys || root.BBKeys.createKeys(null);
     const down = {};
-    const pressed = { special: false, kaboom: false, pause: false };
+    const pressed = { special: false, kaboom: false, pause: false, mute: false };
     return {
       keydown(code) {
-        if (KEYS[code]) { down[KEYS[code]] = true; return true; }
-        if (KEY_PRESSES[code]) { pressed[KEY_PRESSES[code]] = true; return true; }
+        const action = keys.actionFor(code);
+        if (HELD_ACTIONS.includes(action)) { down[action] = true; return true; }
+        if (PRESS_ACTIONS.includes(action)) { pressed[action] = true; return true; }
         return false;
       },
       keyup(code) {
-        if (KEYS[code]) down[KEYS[code]] = false;
+        const action = keys.actionFor(code);
+        if (HELD_ACTIONS.includes(action)) down[action] = false;
       },
+      releaseAll() { for (const a of HELD_ACTIONS) down[a] = false; },
       axes() {
         const x = (down.right ? 1 : 0) - (down.left ? 1 : 0);
         const y = (down.down ? 1 : 0) - (down.up ? 1 : 0);
@@ -158,7 +159,7 @@
       fire() { return !!down.fire; },
       takePressed() {
         const out = { ...pressed };
-        pressed.special = false; pressed.kaboom = false; pressed.pause = false;
+        for (const a of PRESS_ACTIONS) pressed[a] = false;
         return out;
       },
     };
@@ -204,20 +205,50 @@
   // picked by key or click; "howto" and "scores" go back to where they were opened from.
   const MENU_LAYOUT = { x: 140, y: 270, w: 200, h: 38, gap: 12 };
   const TITLE_LAYOUT = { x: 140, y: 330, w: 200, h: 42, gap: 14 };
-  const MENU_ACTIONS = ["resume", "howto", "swap", "restart"];
+  const SETTINGS_LAYOUT = { x: 60, y: 118, w: 360, h: 27, gap: 3 };
+  const GEAR = { x: 436, y: 100, r: 18 }; // the settings gear on the title and pause screens
+  const MENU_ACTIONS =["resume", "howto", "swap", "restart"];
   const TITLE_ACTIONS = ["start", "scores", "howto"];
   const TITLE_ITEMS = ["START", "HIGH SCORES", "HOW TO PLAY"];
   function createMenu(opts) {
     opts = opts || {};
     const m = { screen: opts.screen || "howto", cursor: 0, leftHanded: !!opts.leftHanded, after: "playing" };
+    m.keys = opts.keys || root.BBKeys.createKeys(null);
+    m.settings = opts.settings || root.BBKeys.createSettings(null);
+    m.capturing = null; // the action waiting for its new key on the SETTINGS screen
+    // SETTINGS rows: one per rebindable action, the three switches, then Reset keys and Back
+    m.settingsRows = () => {
+      const K = root.BBKeys;
+      return [
+        ...K.ACTIONS.map((action) => ({ type: "key", action, label: K.LABELS[action], value: m.capturing === action ? "press a key" : m.keys.label(action) })),
+        ...K.SWITCHES.map((name) => ({ type: "switch", name, label: K.SWITCH_LABELS[name], value: m.settings.get(name) ? "ON" : "OFF" })),
+        { type: "reset", label: "Reset keys", value: "" },
+        { type: "back", label: "Back", value: "" },
+      ];
+    };
+    m.openSettings = () => { // the gear on the title and pause screens
+      if (m.screen !== "title" && m.screen !== "pause") return false;
+      m.after = m.screen; m.screen = "settings"; m.cursor = 0; m.capturing = null;
+      return true;
+    };
+    m.gearHit = (x, y) => (m.screen === "title" || m.screen === "pause") && Math.hypot(x - GEAR.x, y - GEAR.y) <= GEAR.r + 8;
+    // the next key press while a row waits: Escape cancels, arrows and Escape can't be bound.
+    // returns "bound" | "cancel" | "rejected" | null (nothing was waiting)
+    m.capture = (code) => {
+      if (!m.capturing) return null;
+      if (code === "Escape") { m.capturing = null; return "cancel"; }
+      if (!m.keys.rebind(m.capturing, code)) return "rejected";
+      m.capturing = null;
+      return "bound";
+    };
     m.items = () => ["Resume", "How to play", "Left-hand: " + (m.leftHanded ? "ON" : "OFF"), "Restart"];
     m.titleItems = () => TITLE_ITEMS.slice();
-    const listFor = () => (m.screen === "title" ? TITLE_ACTIONS : m.screen === "pause" ? MENU_ACTIONS : null);
-    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; };
-    m.toggle = () => { // P / Esc: pause, resume, or dismiss how-to-play / high scores
+    const listFor = () => (m.screen === "title" ? TITLE_ACTIONS : m.screen === "pause" ? MENU_ACTIONS : m.screen === "settings" ? m.settingsRows() : null);
+    const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; m.capturing = null; };
+    m.toggle = () => { // P / Esc: pause, resume, or dismiss how-to-play / high scores / settings
       if (m.screen === "playing") { m.screen = "pause"; m.cursor = 0; }
       else if (m.screen === "pause") m.screen = "playing";
-      else if (m.screen === "howto" || m.screen === "scores") leaveHowTo();
+      else if (m.screen === "howto" || m.screen === "scores" || m.screen === "settings") leaveHowTo();
       return m.screen;
     };
     m.finish = () => { m.screen = "results"; m.cursor = 0; }; // the run is over
@@ -229,7 +260,7 @@
     m.itemAt = (x, y) => {
       const list = listFor();
       if (!list) return -1;
-      const L = m.screen === "title" ? TITLE_LAYOUT : MENU_LAYOUT;
+      const L = m.screen === "title" ? TITLE_LAYOUT : m.screen === "settings" ? SETTINGS_LAYOUT : MENU_LAYOUT;
       for (let i = 0; i < list.length; i++) {
         const top = L.y + i * (L.h + L.gap);
         if (x >= L.x && x <= L.x + L.w && y >= top && y <= top + L.h) return i;
@@ -241,6 +272,16 @@
       if (m.screen === "howto") { leaveHowTo(); return "resume"; }
       if (m.screen === "scores") { leaveHowTo(); return "back"; }
       if (m.screen === "results") return "restart"; // Enter = replay; the caller starts the new run
+      if (m.screen === "settings") {
+        const row = m.settingsRows()[index === undefined ? m.cursor : index];
+        if (!row) return null;
+        if (index !== undefined) m.cursor = index;
+        if (row.type === "key") { m.capturing = row.action; return "capture"; }
+        if (row.type === "switch") { m.settings.toggle(row.name); return "switch"; }
+        if (row.type === "reset") { m.keys.reset(); m.capturing = null; return "reset"; }
+        leaveHowTo();
+        return "back";
+      }
       if (m.screen === "title") {
         const action = TITLE_ACTIONS[index === undefined ? m.cursor : index];
         if (!action) return null;
@@ -334,7 +375,7 @@
   }
 
   root.BBInput = {
-    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, TITLE_ACTIONS, MAX_SCORES,
+    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
   };

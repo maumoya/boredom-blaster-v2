@@ -19,7 +19,9 @@
   if (motionQuery && motionQuery.addEventListener) {
     motionQuery.addEventListener("change", (e) => renderer.setReducedMotion(e.matches));
   }
-  const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded() });
+  const keys = BBKeys.createKeys(storage); // bb.keys
+  const settings = BBKeys.createSettings(storage); // bb.settings: music, sounds, vibration
+  const menu = BBInput.createMenu({ screen: "title", leftHanded: store.loadLeftHanded(), keys, settings });
 
   let game; // created once src/rewards.js has loaded (see the end of this file)
   let best = store.loadBest();
@@ -34,7 +36,7 @@
   let runSeconds = 0; // play time of this run, for the score plausibility check
   let stats = BBInput.createRunStats(); // goals and boss-wave lives for the results screen
   let results = null;
-  const keyboard = BBInput.createKeyboard();
+  const keyboard = BBInput.createKeyboard(keys);
   const touch = BBInput.createTouch(menu.leftHanded);
   const mouse = BBInput.createMouse(touch);
   let touchSeen = false; // the on-screen buttons only show once a finger has been used
@@ -85,6 +87,13 @@
       e.preventDefault();
       return;
     }
+    if (menu.screen === "settings" && menu.capturing) { // the row is waiting for its new key
+      if (menu.capture(e.code) === "bound") keyboard.releaseAll();
+      e.preventDefault();
+      return;
+    }
+    const action = keys.actionFor(e.code);
+    if (e.code === "KeyG" && !action && menu.openSettings()) { e.preventDefault(); return; }
     if (menu.screen === "scores" && SCORE_TAB_KEYS.includes(e.code)) {
       scoresTab = scoresTab === "global" ? "device" : "global";
       e.preventDefault();
@@ -93,9 +102,9 @@
     if (e.code === "Enter") {
       if (menu.screen !== "playing") { runMenuAction(menu.activate()); e.preventDefault(); return; }
     }
-    if (menu.screen === "pause" || menu.screen === "title") {
-      if (e.code === "ArrowUp" || e.code === "KeyW") { menu.move(-1); e.preventDefault(); return; }
-      if (e.code === "ArrowDown" || e.code === "KeyS") { menu.move(1); e.preventDefault(); return; }
+    if (menu.screen === "pause" || menu.screen === "title" || menu.screen === "settings") {
+      if (action === "up") { menu.move(-1); e.preventDefault(); return; }
+      if (action === "down") { menu.move(1); e.preventDefault(); return; }
     }
     if (keyboard.keydown(e.code)) e.preventDefault();
   });
@@ -114,6 +123,12 @@
       const tab = BBRender.scoreTabHit(x, y);
       if (tab) scoresTab = tab;
       else runMenuAction(menu.activate());
+      return true;
+    }
+    if (menu.gearHit(x, y)) { menu.openSettings(); return true; }
+    if (menu.screen === "settings") {
+      const i = menu.itemAt(x, y);
+      if (i >= 0) menu.activate(i);
       return true;
     }
     if (menu.screen === "howto") { runMenuAction(menu.activate()); return true; }
@@ -155,6 +170,11 @@
     };
     const kp = keyboard.takePressed(), tp = touch.takePressed();
     if (kp.pause && game.status === "playing") menu.toggle();
+    if (kp.mute) { // M: all sound off, or back on
+      const on = !(settings.get("music") || settings.get("sounds"));
+      settings.set("music", on);
+      settings.set("sounds", on);
+    }
     if (menu.screen !== "playing") return {};
     if (kp.special || tp.special) BB.special(game);
     if ((kp.kaboom || tp.kaboom) && BB.kaboom(game)) stats.kaboomUsed();
@@ -167,7 +187,9 @@
     last = now;
     const input = readInput();
     game.paused = menu.screen !== "playing";
+    const livesBefore = game.lives;
     BB.update(game, dt, input);
+    if (game.lives < livesBefore && settings.get("vibration") && navigator.vibrate) navigator.vibrate(80);
     if (!game.paused) { renderer.update(dt, game); runSeconds += dt; }
     if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);

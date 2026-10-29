@@ -4,12 +4,13 @@
 (function (root) {
   const WEAPON = { maxLevel: 5, spread: 14 }; // spread: horizontal px between shots
   const CAPSULE = { w: 28, h: 16, speed: 90, everyKills: 12 };
-  const RANKS = ["bronze", "silver", "gold", "rainbow"];
+  const RANKS = ["bronze", "silver", "gold", "rainbow", "heart"];
   // chance of each rank when a capsule is rolled (sums to 1)
-  const RANK_ODDS = { bronze: 0.55, silver: 0.25, gold: 0.15, rainbow: 0.05 };
-  // what each rank gives: bronze = weapon level up, silver = shield, gold = escort, rainbow = Super Star
-  const REWARD = { bronze: "weapon", silver: "shield", gold: "escort", rainbow: "superstar" };
-  const SHIELD = { hits: 3 };
+  const RANK_ODDS = { bronze: 0.52, silver: 0.23, gold: 0.14, rainbow: 0.03, heart: 0.08 };
+  // what each rank gives: bronze = weapon level up, silver = shield, gold = escort, rainbow = Super Star,
+  // heart = an extra life
+  const REWARD = { bronze: "weapon", silver: "shield", gold: "escort", rainbow: "superstar", heart: "life" };
+  const SHIELD = { hits: 3, max: 9 }; // each shield capsule adds `hits`, stacking up to `max`
   const ESCORT = { max: 2, w: 14, h: 14, offset: 34 };
   const SUPER_STAR = { duration: 8, fireRateMult: 3 };
 
@@ -77,7 +78,8 @@
   function applyCapsule(game, rank) {
     switch (REWARD[rank]) {
       case "weapon": game.weaponLevel = Math.min(WEAPON.maxLevel, game.weaponLevel + 1); break;
-      case "shield": game.shield = SHIELD.hits; break;
+      case "shield": game.shield = Math.min(SHIELD.max, game.shield + SHIELD.hits); break;
+      case "life": root.BB.addLife(game); break;
       case "escort": addEscort(game); break;
       case "superstar": game.superStar = SUPER_STAR.duration; break;
       default: return false;

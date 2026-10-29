@@ -4,7 +4,7 @@
 (function (root) {
   const W = 480, H = 640;
   const HUD_H = 64; // two-row top bar
-  const TRAY_Y = H - 120; // the controls tray starts here
+  const CONTROLS_ALPHA = 0.7; // the floating buttons are see-through
   const NEBULA = [ // drifting colour clouds: x, y, radius, colour, drift speed
     { x: 0.2, y: 0.25, r: 190, c: "90,60,200", v: 6 }, { x: 0.8, y: 0.55, r: 220, c: "30,120,200", v: 4 },
     { x: 0.5, y: 0.9, r: 200, c: "190,50,140", v: 5 },
@@ -35,15 +35,20 @@
     { sprite: "meteorBig2", size: 48, speed: 22 }, { sprite: "meteorSmall", size: 22, speed: 48 },
     { sprite: "meteorTiny", size: 14, speed: 60 },
   ];
-  const HOW_TO_ROWS = [
-    { icon: "heart", text: "Steer: drag left half / arrows / WASD" },
-    { icon: "fire", text: "Fire: hold Space or the FIRE button" },
-    { icon: "spec", text: "Special (X): piercing shot" },
-    { icon: "boom", text: "Kaboom (B): blasts nearby enemies" },
-    { icon: "weapon", text: "Capsules: weapon level up" },
-    { icon: "shield", text: "Silver: shield, gold: escort" },
-    { icon: "pause", text: "Pause: P or Esc" },
-  ];
+  // the how-to-play rows, showing the keys currently bound (keys: a BBKeys.createKeys() object)
+  function howToRows(keys) {
+    const k = (a) => keys.label(a);
+    return [
+      { icon: "heart", text: "Steer: drag left half / arrows / " + [k("up"), k("left"), k("down"), k("right")].join("") },
+      { icon: "fire", text: "Fire: hold " + k("fire") + " or the FIRE button" },
+      { icon: "spec", text: "Special (" + k("special") + "): piercing shot" },
+      { icon: "boom", text: "Kaboom (" + k("kaboom") + "): blasts nearby enemies" },
+      { icon: "weapon", text: "Capsules: weapon level up" },
+      { icon: "shield", text: "Silver: shield, gold: escort, heart: life" },
+      { icon: "pause", text: "Pause: " + k("pause") + " or Esc" },
+    ];
+  }
+  const HOW_TO_ROWS = howToRows(root.BBKeys.createKeys(null));
   const HOW_TO = HOW_TO_ROWS.map((r) => r.text);
   const SHAKE = { time: 0.3, mag: 6 }; // screen shake after a lost life
   const PULSE = { depth: 0.06, speed: 4 }; // gentle breathing of the title and the replay prompt
@@ -98,7 +103,7 @@
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
     }
     const rainbow = (t) => "hsl(" + (Math.floor(t * 250) % 360) + ",90%,60%)";
-    const rankColor = (rank, t) => (rank === "rainbow" ? rainbow(t) : RANK_COLOR[rank] || "#fff");
+    const rankColor = (rank, t) => (rank === "rainbow" ? rainbow(t) : rank === "heart" ? "#f45" : RANK_COLOR[rank] || "#fff");
     const center = (e) => [e.x + e.w / 2, e.y + e.h / 2];
 
     // ---- effects state ----
@@ -228,6 +233,11 @@
       ctx.save();
       ctx.shadowColor = rankColor(c.rank, t);
       ctx.shadowBlur = 10;
+      if (c.rank === "heart") { // no sprite for the heart capsule: a red heart badge
+        ui.icon("heart", cx, cy, c.h * 1.5, "#f45");
+        ctx.restore();
+        return;
+      }
       sprite(RANK_SPRITE[c.rank] || "capsuleBronze", cx, cy, c.w, () => {
         ctx.fillStyle = rankColor(c.rank, t);
         ctx.fillRect(c.x + 4, c.y, c.w - 8, c.h);
@@ -309,8 +319,8 @@
       text("SCORE", 10, 43, 9, "#9ab");
       text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
       iconBar("weapon", 150, 48, R.WEAPON.maxLevel, game.weaponLevel, RANK_COLOR.bronze);
-      iconBar("shield", 252, 48, R.SHIELD.hits, game.shield, RANK_COLOR.silver);
-      iconBar("escort", 340, 48, R.ESCORT.max, game.escorts.length, RANK_COLOR.gold);
+      iconBar("shield", 236, 48, R.SHIELD.max, game.shield, RANK_COLOR.silver);
+      iconBar("escort", 362, 48, R.ESCORT.max, game.escorts.length, RANK_COLOR.gold);
       if (game.superStar > 0) { // rainbow timer along the bottom edge of the bar
         ctx.fillStyle = rainbow(t);
         ctx.fillRect(6, HUD_H - 6, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
@@ -322,7 +332,8 @@
       const touch = view.touch, game = view.game, BB = root.BB, IN = root.BBInput;
       const B = touch ? touch.buttons() : IN.buttonsFor(!!(view.menu && view.menu.leftHanded));
       const held = (name) => !!touch && touch.isHeld(name);
-      ui.panel(0, TRAY_Y, W, H - TRAY_Y, { radius: 0, stroke: "#2a4a7a" });
+      ctx.save();
+      ctx.globalAlpha = CONTROLS_ALPHA; // no tray: the buttons float over the playfield
 
       const firing = held("fire") || !!view.firing;
       ui.iconButton(B.fire.x, B.fire.y, B.fire.r, "fire", { state: firing ? "pressed" : "idle", color: "#ff7a5a", label: "FIRE" });
@@ -344,6 +355,7 @@
       for (let i = 0; i < BB.KABOOM.maxCharges; i++) {
         circle(B.kaboom.x - 12 + i * 12, B.kaboom.y + B.kaboom.r + 9, 4, i < game.kaboomCharges ? "#fd4" : "rgba(255,255,255,0.2)");
       }
+      ctx.restore();
       drawStick(touch);
     }
 
@@ -454,11 +466,32 @@
       text("Arrows: letters and slots, Enter: OK", W / 2, 490, 13, "#9ab", "center");
     }
 
-    function drawHowTo() {
+    // settings gear in the corner of the title and pause screens
+    function drawGear(menu) {
+      const G = root.BBInput.GEAR;
+      ui.iconButton(G.x, G.y, G.r, "gear", { state: menu.screen === "settings" ? "pressed" : "idle" });
+    }
+
+    // SETTINGS: every action with its key (click or Enter, then press the new key), the switches, Reset, Back
+    function drawSettings(menu) {
+      const L = root.BBInput.SETTINGS_LAYOUT;
+      dim(0.85);
+      ui.title("SETTINGS", W / 2, 90, 28);
+      menu.settingsRows().forEach((row, i) => {
+        const y = L.y + i * (L.h + L.gap), hot = i === menu.cursor;
+        ui.button(L.x, y, L.w, L.h, "", hot ? "hot" : "idle");
+        const ink = hot ? "#1a1000" : "#fff";
+        text(row.label, L.x + 14, y + 19, 14, ink);
+        if (row.value) text(row.value, L.x + L.w - 14, y + 19, 14, menu.capturing && hot ? "#f55" : ink, "right");
+      });
+      text("Arrows and Esc always work. Esc or P: back", W / 2, 626, 12, "#fd4", "center");
+    }
+
+    function drawHowTo(menu) {
       dim(0.82);
       ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
       ui.title("HOW TO PLAY", W / 2, 140, 28);
-      HOW_TO_ROWS.forEach((row, i) => {
+      (menu && menu.keys ? howToRows(menu.keys) : HOW_TO_ROWS).forEach((row, i) => {
         const y = 195 + i * 40;
         ui.icon(row.icon, 76, y - 5, 24, "#4df");
         text(row.text, 98, y, 14, "#fff");
@@ -514,10 +547,11 @@
       const screen = view.menu && view.menu.screen;
       if (screen === "initials") drawInitials(view);
       else if (game.status === "over" || screen === "results") drawResults(view);
-      else if (screen === "title") drawTitle(view);
+      else if (screen === "title") { drawTitle(view); drawGear(view.menu); }
       else if (screen === "scores") drawScores(view);
-      else if (screen === "pause") drawPause(view.menu);
-      else if (screen === "howto") drawHowTo();
+      else if (screen === "pause") { drawPause(view.menu); drawGear(view.menu); }
+      else if (screen === "settings") drawSettings(view.menu);
+      else if (screen === "howto") drawHowTo(view.menu);
     }
 
     return {
@@ -536,5 +570,5 @@
     return null;
   }
 
-  root.BBRender = { createRenderer, HOW_TO, HOW_TO_ROWS, SCORE_TABS, scoreTabHit };
+  root.BBRender = { createRenderer, HOW_TO, HOW_TO_ROWS, howToRows, SCORE_TABS, scoreTabHit };
 })(globalThis);
