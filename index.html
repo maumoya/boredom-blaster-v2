@@ -11,13 +11,22 @@
 </head>
 <body>
 <canvas id="screen"></canvas>
-<script src="src/game.js"></script>
-<script src="src/input.js"></script>
-<script src="src/scores.js"></script>
-<script src="src/scoresNet.js"></script>
-<script src="src/assets.js"></script>
-<script src="src/ui.js"></script>
-<script src="src/render.js"></script>
-<script src="src/main.js"></script>
+<script>
+(function () {
+  var fallback = ["src/rewards.js","src/enemies.js","src/game.js","src/input.js","src/scores.js","src/scoresNet.js","src/assets.js","src/ui.js","src/render.js","src/main.js"];
+  function load(list, v, i) {
+    if (i >= list.length) return;
+    var s = document.createElement("script");
+    s.src = list[i] + "?v=" + v;
+    s.async = false;
+    s.onload = function () { load(list, v, i + 1); };
+    s.onerror = function () { console.error("Boredom Blaster: " + list[i] + " failed to load"); };
+    document.body.appendChild(s);
+  }
+  fetch("version.json", { cache: "no-store" }).then(function (r) { return r.json(); })
+    .then(function (d) { load(d.scripts, d.v, 0); })
+    .catch(function () { load(fallback, Date.now(), 0); });
+})();
+</script>
 </body>
 </html>
