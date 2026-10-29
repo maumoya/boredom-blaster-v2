@@ -1310,14 +1310,72 @@
       menu.items().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
     }
 
+    // the big bang behind the title: a glow, two jagged fireballs and flying debris
+    // a radial gradient from the centre with these stops, or the flat fallback when gradients are missing
+    function radial(x, y, r, stops, fallback) {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      if (!g || typeof g.addColorStop !== "function") return fallback;
+      stops.forEach(([at, c]) => g.addColorStop(at, c));
+      return g;
+    }
+    const BLAST_SPIKES = Array.from({ length: 22 }, (_, i) => 0.62 + 0.38 * frac(i + 1, 377.7));
+    function titleBlast(cx, cy, r, t) {
+      const a = reducedMotion ? 0 : t;
+      const k = reducedMotion ? 1 : 1 + 0.04 * Math.sin(a * 2.3);
+      ctx.save();
+      ctx.fillStyle = radial(cx, cy, r * 1.15, [[0, "rgba(255,250,210,0.85)"], [0.25, "rgba(255,190,60,0.6)"],
+        [0.55, "rgba(255,80,40,0.32)"], [1, "rgba(120,10,70,0)"]], "rgba(255,120,40,0.2)");
+      ctx.fillRect(cx - r * 1.2, cy - r * 1.2, r * 2.4, r * 2.4);
+      const burst = (rr, spin, inner, outer) => {
+        ctx.beginPath();
+        BLAST_SPIKES.forEach((s, i) => {
+          const ang = spin + (i / BLAST_SPIKES.length) * Math.PI * 2, half = Math.PI / BLAST_SPIKES.length;
+          const tip = rr * s * k, notch = rr * 0.42 * k;
+          ctx.lineTo(cx + Math.cos(ang) * tip, cy + Math.sin(ang) * tip * 0.72);
+          ctx.lineTo(cx + Math.cos(ang + half) * notch, cy + Math.sin(ang + half) * notch * 0.72);
+        });
+        ctx.closePath();
+        ctx.fillStyle = radial(cx, cy, rr, [[0, inner], [1, outer]], inner); ctx.fill();
+      };
+      burst(r, a * 0.05, "rgba(255,170,40,0.75)", "rgba(220,40,40,0.15)");
+      burst(r * 0.62, -a * 0.08 + 0.4, "rgba(255,255,230,0.9)", "rgba(255,190,50,0.35)");
+      for (let i = 0; i < 14; i++) { // debris flung outward, looping
+        const ang = frac(i + 1, 613.1) * Math.PI * 2, d = ((frac(i + 1, 271.3) + a * 0.12) % 1);
+        const x = cx + Math.cos(ang) * r * (0.5 + d * 0.7), y = cy + Math.sin(ang) * r * 0.72 * (0.5 + d * 0.7);
+        ctx.save(); ctx.translate(x, y); ctx.rotate(ang + a * 3);
+        ctx.globalAlpha = 1 - d * 0.8;
+        ctx.fillStyle = i % 3 ? "#3a2a2e" : N.orange;
+        ctx.fillRect(-3, -2, 6 + (i % 4), 4);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // the hero ship back from the war: cracked and burning, a little tilted, trailing smoke
+    function warShip(cx, cy, t) {
+      const a = reducedMotion ? 0 : t;
+      for (let i = 0; i < 7; i++) { // smoke from the right wing, drifting back (down the screen)
+        const p = (a * 0.7 + i / 7) % 1;
+        circle(cx + 17 + Math.sin(p * 6 + i) * 6 + p * 16, cy + 10 + p * 58, 6 + p * 15, "rgba(34,30,38," + (0.85 * (1 - p)).toFixed(3) + ")");
+      }
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(-0.12 + 0.03 * Math.sin(a * 1.7));
+      shipArt.draw(ctx, "player", 0, 0, 72, { dmg: 3 });
+      ctx.restore();
+      const f = reducedMotion ? 1 : 0.7 + 0.3 * Math.sin(a * 23); // the wing fire flickers
+      circle(cx + 17, cy + 7, 6 * f, "rgba(255,150,40,0.85)");
+      circle(cx + 17, cy + 6, 3 * f, "rgba(255,245,180,0.95)");
+    }
+
     function drawTitle(view) {
       const menu = view.menu, t = view.time || 0, L = root.BBInput.TITLE_LAYOUT;
       dim(0.45);
-      pulsed(W / 2, 150, t, () => {
-        ui.title("BOREDOM", W / 2, 150, 54);
-        ui.title("BLASTER", W / 2, 215, 54, N.yellow);
+      titleBlast(W / 2, 160, 200, t);
+      pulsed(W / 2, 160, t, () => {
+        ui.pixelTitle("BOREDOM", W / 2, 106, 7);
+        ui.pixelTitle("BLASTER", W / 2, 170, 7);
       });
-      shipArt.draw(ctx, "player", W / 2, 268, 60);
+      warShip(W / 2, 266, t);
       const icons = ["play", "star", "weapon"];
       menu.titleItems().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
       text("BEST " + (view.best || 0), W / 2, 500, 16, N.yellow, "center");

@@ -204,6 +204,27 @@
       ctx.restore();
     }
 
+    // chunky arcade lettering: 5x7 pixel glyphs made bold (each lit cell also lights the one on its
+    // right, so letters are 6 cells wide), a dark drop, a pink outline and a yellow fill
+    function pixelTitle(str, cx, top, px) {
+      const glyphs = [...str].map((ch) => PIXEL_FONT[ch] || PIXEL_FONT[" "]);
+      const cols = glyphs.length * 7 - 1, left = Math.round(cx - (cols * px) / 2), o = px * 0.36;
+      const cells = (grow, dy) => {
+        ctx.beginPath();
+        glyphs.forEach((g, gi) => g.forEach((row, r) => [...row].forEach((bit, c) => {
+          // 2 cells wide plus a hair of overlap, so no seams show between neighbours
+          if (bit === "1") ctx.rect(left + (gi * 7 + c) * px - grow, top + r * px - grow + dy, px * 2 + grow * 2, px + grow * 2 + 0.5);
+        })));
+      };
+      ctx.save();
+      cells(o, Math.round(px * 0.7)); ctx.fillStyle = "#2a0630"; ctx.fill(); // the drop under the letters
+      cells(o, 0); ctx.fillStyle = "#ff3d9a"; ctx.fill(); // the pink outline
+      cells(0, 0);
+      ctx.fillStyle = vertical(top, top + 7 * px, "#fff8a8", "#ffb81a", "#ffe23a");
+      ctx.fill();
+      ctx.restore();
+    }
+
     function starShape(cx, cy, r, fill, stroke) {
       ctx.beginPath();
       for (let i = 0; i < 10; i++) {
@@ -285,8 +306,23 @@
       ctx.restore();
     }
 
-    return { panel, button, iconButton, ringButton, dpad, title, stars, icon: icon_, roundPath };
+    return { panel, button, iconButton, ringButton, dpad, title, pixelTitle, stars, icon: icon_, roundPath };
   }
 
-  root.BBUI = { createUI, ICONS, PALETTE, NEON, FONT, font };
+  // 5x7 glyphs for the title lettering (only the letters it needs)
+  const PIXEL_FONT = {
+    " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
+    A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+    B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+    E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+    L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+    M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+    O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+    R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+    S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+    T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  };
+
+  root.BBUI = { createUI, PIXEL_FONT, ICONS, PALETTE, NEON, FONT, font };
 })(globalThis);
