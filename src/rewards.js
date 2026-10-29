@@ -9,13 +9,23 @@
   const RANK_ODDS = { bronze: 0.52, silver: 0.23, gold: 0.14, rainbow: 0.03, heart: 0.08 };
   // what each rank gives: bronze = weapon level up, silver = shield, gold = escort, rainbow = Super Star,
   // heart = an extra life
-  const REWARD = { bronze: "weapon", silver: "shield", gold: "escort", rainbow: "superstar", heart: "life" };
+  // (the escort capsule is retired: gold now gives 2 skill picks, see skills.js)
+  const REWARD = { bronze: "skill", silver: "skill", gold: "skill", rainbow: "superstar", heart: "life" };
+  const TWIN = { charges: 20 }; // a TWIN charge doubles one volley; a rainbow capsule gives it while Super Star is on
   const SHIELD = { hits: 3, max: 9 }; // each shield capsule adds `hits`, stacking up to `max`
   const ESCORT = { max: 2, w: 14, h: 14, offset: 34 };
   const SUPER_STAR = { duration: 8, fireRateMult: 3 };
 
   function initRewards(game) {
-    game.weaponLevel = 1;
+    const S = root.BBSkills;
+    S.init(game);
+    // game.weaponLevel is the "More shots" tier
+    Object.defineProperty(game, "weaponLevel", {
+      configurable: true, enumerable: true,
+      get() { return game.skills.more; },
+      set(v) { S.setTier(game, "more", Math.max(1, v)); },
+    });
+    game.twinCharges = 0;
     game.capsules = [];
     game.shield = 0;
     game.escorts = [];
@@ -49,14 +59,14 @@
     return spawnCapsule(game, x, y);
   }
 
-  // Shot x offsets from the ship centre for a weapon level: one shot per level.
+  // Shot x offsets from the ship centre for a weapon level (forward streams only).
   function weaponShots(level) {
-    const n = Math.max(1, Math.min(WEAPON.maxLevel, level));
-    return Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * WEAPON.spread);
+    return root.BBSkills.volley(Math.max(1, level)).filter((v) => v.dir < 0).map((v) => v.dx);
   }
 
   function fireRateMult(game) {
-    return game.superStar > 0 ? SUPER_STAR.fireRateMult : 1;
+    const S = root.BBSkills;
+    return (game.superStar > 0 ? SUPER_STAR.fireRateMult : 1) * S.fireRate(S.tier(game, "faster"));
   }
 
   function addEscort(game) {
@@ -77,11 +87,12 @@
 
   function applyCapsule(game, rank) {
     switch (REWARD[rank]) {
-      case "weapon": game.weaponLevel = Math.min(WEAPON.maxLevel, game.weaponLevel + 1); break;
-      case "shield": game.shield = Math.min(SHIELD.max, game.shield + SHIELD.hits); break;
+      case "skill": root.BBSkills.capsule(game, rank); break;
       case "life": root.BB.addLife(game); break;
-      case "escort": addEscort(game); break;
-      case "superstar": game.superStar = SUPER_STAR.duration; break;
+      case "superstar":
+        if (game.superStar > 0) game.twinCharges += TWIN.charges;
+        else game.superStar = SUPER_STAR.duration;
+        break;
       default: return false;
     }
     return true;
@@ -101,9 +112,9 @@
     placeEscorts(game);
   }
 
-  // Losing a life drops the weapon one level (never below 1).
+  // Losing a life drops the most recently upgraded skill family one tier (not MASTERED or ULTRA-MAD).
   function onLifeLost(game) {
-    game.weaponLevel = Math.max(1, game.weaponLevel - 1);
+    root.BBSkills.onLifeLost(game);
   }
 
   // A hit on the ship: Super Star ignores it, the shield soaks it, otherwise it goes through.
@@ -123,7 +134,7 @@
   }
 
   root.BBRewards = {
-    WEAPON, CAPSULE, RANKS, RANK_ODDS, REWARD, SHIELD, ESCORT, SUPER_STAR,
+    WEAPON, TWIN, CAPSULE, RANKS, RANK_ODDS, REWARD, SHIELD, ESCORT, SUPER_STAR,
     initRewards, rollRank, spawnCapsule, onKill, onMiniBossKill, weaponShots, fireRateMult,
     addEscort, placeEscorts, applyCapsule, updateCapsules, updateTimers, onLifeLost, absorbHit, hitEscort,
   };

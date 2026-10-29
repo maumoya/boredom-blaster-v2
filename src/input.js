@@ -131,6 +131,8 @@
       layout: () => layout,
       buttons,
       start(id, x, y) {
+        const S = root.BBSkills;
+        if (S && S.picker && S.pickerTap(S.game, x, y)) return; // a tap while the picker is open only picks
         const d = layout && layout.dpad && dpadVector(layout.dpad, x, y);
         if (d && pad.id === null) { pad = { id, x: d.x, y: d.y }; return; }
         if ((x < W / 2) !== swapped) { if (!(layout && layout.dpad)) stick.start(id, x, y); return; } // with a D-pad there is no floating stick
@@ -191,6 +193,8 @@
     const pressed = { special: false, kaboom: false, pause: false, mute: false };
     return {
       keydown(code) {
+        const S = root.BBSkills;
+        if (S && S.picker && S.pickerKey(S.game, code)) return true; // the skill picker owns the keys while open
         const action = keys.actionFor(code);
         if (HELD_ACTIONS.includes(action)) { down[action] = true; return true; }
         if (PRESS_ACTIONS.includes(action)) { pressed[action] = true; return true; }

@@ -21,6 +21,8 @@
 
   const R = () => root.BBRewards; // src/rewards.js, loaded before the game is created
   const E = () => root.BBEnemies; // src/enemies.js, loaded before the game is created
+  const K = () => root.BBSkills; // src/skills.js, loaded right behind this file
+  const TWIN_GAP = 8; // px each side of a stream when a TWIN charge doubles the volley
 
   function hit(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -59,12 +61,21 @@
 
   function shoot(game) {
     if (game.status !== "playing" || game.cooldown > 0) return false;
-    for (const dx of R().weaponShots(game.weaponLevel)) {
-      game.bullets.push({
-        x: game.ship.x + (game.ship.w - BULLET.w) / 2 + dx,
-        y: game.ship.y - BULLET.h,
-        w: BULLET.w, h: BULLET.h,
-      });
+    const S = K(), tr = (id) => S.tier(game, id);
+    const w = BULLET.w * S.widthMult(tr("larger")), h = BULLET.h * S.sizeMult(tr("larger"));
+    const speed = BULLET.speed * S.bulletSpeed(tr("faster"));
+    const twin = game.twinCharges > 0;
+    if (twin) game.twinCharges -= 1;
+    for (const v of S.volley(tr("more"))) {
+      for (const twinDx of twin ? [-TWIN_GAP, TWIN_GAP] : [0]) {
+        game.bullets.push({
+          x: game.ship.x + (game.ship.w - w) / 2 + v.dx + twinDx,
+          y: v.dir < 0 ? game.ship.y - h : game.ship.y + game.ship.h,
+          w, h, speed, vx: Math.sin(v.angle) * speed, dir: v.dir,
+          pierces: S.pierce(tr("larger")), trail: S.hasTrails(tr("faster")),
+          tier: S.highestTier(game),
+        });
+      }
     }
     game.cooldown = BULLET.cooldown / R().fireRateMult(game);
     return true;
@@ -85,8 +96,18 @@
   const isFormation = (e) => !e.pattern || e.pattern === "formation";
   const pointsOf =(e) => e.points || DRONE.points;
 
+  // points for one enemy, with Score per hit; ULTRA-MAD also floats red points
+  function award(game, e) {
+    const tier = K().tier(game, "score");
+    const pts = Math.round(pointsOf(e) * K().scoreMult(tier));
+    game.score += pts;
+    if (tier < K().ULTRA) return;
+    game.pops = (game.pops || []).slice(-19);
+    game.pops.push({ x: e.x + e.w / 2, y: e.y, text: "+" + pts, life: 0.8, max: 0.8 });
+  }
+
   function addKill(game, drone) {
-    game.score += pointsOf(drone);
+    award(game, drone);
     game.kills += 1;
     if (drone) R().onKill(game, drone.x + drone.w / 2, drone.y);
     if (game.kills % KABOOM.killsPerCharge === 0) {
@@ -98,7 +119,7 @@
   // mini-bosses always drop a capsule.
   function destroy(game, e, byKaboom) {
     e.dead = true;
-    if (byKaboom) game.score += pointsOf(e);
+    if (byKaboom) award(game, e);
     else addKill(game, e);
     if (e.boss) R().onMiniBossKill(game, e.x + e.w / 2, e.y + e.h);
     if (!byKaboom) game.drones.push(...E().splitChildren(game, e));
@@ -157,6 +178,8 @@
   function update(game, dt, input) {
     if (game.status !== "playing" || game.paused) return;
     input = input || {};
+    dt *= K().timeScale(game); // the skill picker slows the game to 15 %
+    if (game.pops) game.pops = game.pops.map((p) => ({ ...p, y: p.y - 30 * dt, life: p.life - dt })).filter((p) => p.life > 0);
     const move = moveVector(input);
     game.ship.x = Math.max(0, Math.min(W - game.ship.w, game.ship.x + move.x * SHIP.speed * dt));
     game.ship.y = Math.max(SHIP_MIN_Y, Math.min(PLAY_H - game.ship.h, game.ship.y + move.y * SHIP.speed * dt));
@@ -170,8 +193,11 @@
     E().updateEnemies(game, dt);
     E().moveBullets(game, dt);
     game.enemyBullets = game.enemyBullets.filter((b) => b.y < PLAY_H); // shots stop at the bottom edge
-    for (const b of game.bullets) b.y -= (b.pierce ? SPECIAL.speed : BULLET.speed) * dt;
-    game.bullets = game.bullets.filter((b) => b.y + b.h > 0);
+    for (const b of game.bullets) {
+      b.y += (b.dir || -1) * (b.speed || (b.pierce ? SPECIAL.speed : BULLET.speed)) * dt;
+      if (b.vx) b.x += b.vx * dt;
+    }
+    game.bullets = game.bullets.filter((b) => b.y + b.h > 0 && b.y < PLAY_H && b.x + b.w > 0 && b.x < W);
 
     // formation drones sweep sideways, drop half a row at each edge; faster with the wave, the cycle
     // and as the swarm thins. The other species move on their own patterns (enemies.js).
@@ -203,9 +229,12 @@
         }
         continue;
       }
-      const d = game.drones.find((e) => !e.dead && hit(b, e));
+      b.struck = b.struck || new Set();
+      const d = game.drones.find((e) => !e.dead && !b.struck.has(e) && hit(b, e));
       if (d) {
-        b.dead = true;
+        b.struck.add(d);
+        if (b.pierces > 0) b.pierces -= 1; // a Larger shots bullet passes through
+        else b.dead = true;
         hurt(game, d, 1);
       }
     }
@@ -244,10 +273,13 @@
     return createGame();
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, special, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.
 if (!globalThis.BBEnemies && typeof document !== "undefined" && document.currentScript) {
   document.write('<script src="' + document.currentScript.src.replace(/game\.js(\?.*)?$/, "enemies.js") + '"><\/script>');
+}
+if (!globalThis.BBSkills && typeof document !== "undefined" && document.currentScript) {
+  document.write('<script src="' + document.currentScript.src.replace(/game\.js(\?.*)?$/, "skills.js") + '"><\/script>');
 }

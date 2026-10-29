@@ -44,8 +44,8 @@
       { icon: "fire", text: "Fire: hold " + k("fire") + " or the FIRE button" },
       { icon: "spec", text: "Special (" + k("special") + "): piercing shot" },
       { icon: "boom", text: "Kaboom (" + k("kaboom") + "): blasts nearby enemies" },
-      { icon: "weapon", text: "Capsules: weapon level up" },
-      { icon: "shield", text: "Silver: shield, gold: escort, heart: life" },
+      { icon: "weapon", text: "Capsules: pick a skill (1-7, arrows + Enter)" },
+      { icon: "shield", text: "Silver: +shield, gold: 2 picks, heart: life" },
       { icon: "pause", text: "Pause: " + k("pause") + " or Esc" },
     ];
   }
@@ -173,11 +173,13 @@
     }
 
     // layered engine flame: outer orange teardrop, inner white-yellow core, flickering with time
-    function drawEngineFlame(cx, baseY, t) {
+    function drawEngineFlame(cx, baseY, t, ultra) {
       const f = 0.8 + 0.2 * Math.sin(t * 40) + 0.1 * Math.sin(t * 23);
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      for (const [w, len, color] of [[7, 22, "rgba(255,120,30,0.8)"], [4, 14, "rgba(255,230,120,0.95)"]]) {
+      const layers = ultra ? [[8, 28, "rgba(255,40,20,0.85)"], [4, 16, "rgba(255,150,60,0.95)"]]
+        : [[7, 22, "rgba(255,120,30,0.8)"], [4, 14, "rgba(255,230,120,0.95)"]];
+      for (const [w, len, color] of layers) {
         ctx.beginPath();
         ctx.moveTo(cx - w, baseY);
         ctx.quadraticCurveTo(cx, baseY + len * 1.4 * f, cx + w, baseY);
@@ -217,6 +219,53 @@
       });
     }
 
+    // MASTERED projectiles glow gold, ULTRA-MAD ones red-hot; ULTRA-MAD faster shots leave a trail
+    const PROJECTILE = { 6: "#ffd23c", 7: "#ff4b1f" };
+    function drawBullet(b) {
+      if (b.pierce) { glowRect(b, "special", N.magenta); return; }
+      const color = PROJECTILE[b.tier] || N.cyan;
+      if (b.trail) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = color;
+        ctx.fillRect(b.x, b.dir > 0 ? b.y - 18 : b.y + b.h, b.w, 18);
+        ctx.restore();
+      }
+      glowRect(b, "bullet", color);
+    }
+
+    // The highest skill tier sets the ship aura: MASTERED pulsing gold with flame spikes and sparkles,
+    // ULTRA-MAD flickering red-orange flames and embers. Reduced motion keeps it static.
+    function drawAura(game, cx, cy, t) {
+      const tierNow = root.BBSkills.highestTier(game);
+      if (tierNow < root.BBSkills.MASTERED) return;
+      const ultra = tierNow >= root.BBSkills.ULTRA, k = reducedMotion ? 0 : 1, ph = t * k;
+      const rgb = ultra ? "255,70,20" : "255,210,60";
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const r = 26 + (ultra ? 0 : 3 * Math.sin(ph * 4));
+      circle(cx, cy, r, "rgba(" + rgb + ",0.18)", "rgba(" + rgb + ",0.8)", 2);
+      const spikes = ultra ? 12 : 8;
+      ctx.fillStyle = "rgba(" + rgb + ",0.7)";
+      for (let i = 0; i < spikes; i++) {
+        const a = (i / spikes) * Math.PI * 2 + ph * 0.8;
+        const len = 10 + (ultra ? 6 * Math.sin(ph * 25 + i * 2.1) : 4 * Math.sin(ph * 6 + i));
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a - 0.12) * r, cy + Math.sin(a - 0.12) * r);
+        ctx.lineTo(cx + Math.cos(a) * (r + len), cy + Math.sin(a) * (r + len));
+        ctx.lineTo(cx + Math.cos(a + 0.12) * r, cy + Math.sin(a + 0.12) * r);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillStyle = ultra ? "rgba(255,160,60,0.9)" : "rgba(255,255,200,0.9)"; // embers / sparkles
+      for (let i = 0; i < 6; i++) {
+        const a = i * 1.05 + ph * 1.5, rr = r + 8 + ((ph * (ultra ? 40 : 10) + i * 9) % 14);
+        ctx.fillRect(cx + Math.cos(a) * rr - 1, cy + Math.sin(a) * rr - 1, 2, 2);
+      }
+      ctx.restore();
+    }
+
     function glowRect(b, name, color) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -251,7 +300,8 @@
       const blink = game.invuln > 0 && Math.floor(game.invuln * 10) % 2 === 0;
       if (game.status !== "playing" || blink) return;
       const flicker = 0.8 + 0.2 * Math.sin(t * 40);
-      drawEngineFlame(cx, s.y + s.h - 2, t);
+      drawAura(game, cx, cy, t);
+      drawEngineFlame(cx, s.y + s.h - 2, t, root.BBSkills.highestTier(game) >= root.BBSkills.ULTRA);
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
       const shipFallback = () => {
         ctx.fillStyle = N.cyan;
@@ -320,6 +370,46 @@
       ctx.restore();
     }
 
+    // tier pips: normal tiers fill pips in the family colour, MASTERED all gold, ULTRA-MAD all red
+    function pips(x, y, tier, gap, r, color) {
+      const S = root.BBSkills, full = tier >= S.MASTERED;
+      const c = tier >= S.ULTRA ? N.red : full ? RANK_COLOR.gold : color;
+      for (let i = 0; i < 5; i++) circle(x + i * gap, y, r, full || i < tier ? c : "rgba(255,255,255,0.2)");
+    }
+
+    // HUD second row: owned skill families as small icons with tier pips
+    function drawSkillRow(game) {
+      const S = root.BBSkills;
+      S.owned(game).forEach((f, i) => {
+        const x = 112 + i * 35, tier = S.tier(game, f.id);
+        const c = tier >= S.ULTRA ? N.red : tier >= S.MASTERED ? RANK_COLOR.gold : N.cyan;
+        ui.icon(f.icon, x + 12, 42, 11, c);
+        pips(x + 2, 55, tier, 5, 1.6, N.cyan);
+      });
+    }
+
+    // the skill picker: seven cards, the game keeps running at 15 % behind it
+    function drawPicker(game, t) {
+      const S = root.BBSkills;
+      dim(0.55);
+      ui.title("CHOOSE A SKILL", W / 2, 90, 26, N.yellow);
+      text(game.picks > 1 ? game.picks + " picks left" : "1 pick", W / 2, 118, 13, N.dim, "center");
+      S.FAMILIES.forEach((f, i) => {
+        const r = S.cardRect(i), tier = S.tier(game, f.id), maxed = tier >= S.MAX_TIER;
+        const selected = game.picker.cursor === i;
+        ctx.save();
+        if (maxed) ctx.globalAlpha = 0.35; // ULTRA-MAD families are greyed out
+        ui.panel(r.x, r.y, r.w, r.h, { stroke: selected && !maxed ? N.yellow : N.violet });
+        ui.icon(f.icon, r.x + 20, r.y + 24, 14, maxed ? "#999" : N.cyan);
+        text((i + 1) + "  " + f.name, r.x + 40, r.y + 29, 14, "#fff");
+        pips(r.x + 16, r.y + 50, tier, 11, 4, N.cyan);
+        const badge = S.tierName(tier);
+        if (badge) text(badge, r.x + r.w - 8, r.y + 54, 11, tier >= S.ULTRA ? N.red : RANK_COLOR.gold, "right");
+        text(maxed ? "ULTRA-MAD" : "Next: " + S.nextText(f.id, tier), r.x + 12, r.y + 80, 11, maxed ? "#999" : N.dim);
+        ctx.restore();
+      });
+    }
+
     function drawHud(view) {
       const { game } = view, t = view.time || 0;
       const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
@@ -336,9 +426,8 @@
       // row 2: score counter and the weapon / shield / escort bars
       text("SCORE", 10, 43, 9, N.dim);
       text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
-      iconBar("weapon", 150, 48, R.WEAPON.maxLevel, game.weaponLevel, RANK_COLOR.bronze);
-      iconBar("shield", 236, 48, R.SHIELD.max, game.shield, RANK_COLOR.silver);
-      iconBar("escort", 362, 48, R.ESCORT.max, game.escorts.length, RANK_COLOR.gold);
+      drawSkillRow(game);
+      iconBar("shield", 362, 48, R.SHIELD.max, game.shield, RANK_COLOR.silver);
       if (game.superStar > 0) { // rainbow timer along the bottom edge of the bar
         ctx.fillStyle = rainbow(t);
         ctx.fillRect(6, HUD_H - 6, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
@@ -554,11 +643,16 @@
       for (const d of game.drones) drawEnemy(d);
       for (const c of game.capsules) drawCapsule(c, t);
       for (const e of game.escorts) drawEscort(e);
-      for (const b of game.bullets) glowRect(b, b.pierce ? "special" : "bullet", b.pierce ? N.magenta : N.cyan);
+      for (const b of game.bullets) drawBullet(b);
       for (const b of game.enemyBullets) glowRect(b, "enemyBullet", N.red);
       drawShip(game, t);
       drawShockwaves();
       drawParticles();
+      for (const p of game.pops || []) { // ULTRA-MAD Score per hit: red floating points
+        ctx.globalAlpha = Math.max(0, p.life / p.max);
+        text(p.text, p.x, p.y, 14, "#ff3b2f", "center");
+      }
+      ctx.globalAlpha = 1;
       if (flash.time > 0) {
         ctx.fillStyle = "rgba(255,60,60," + (0.4 * flash.time / FLASH_TIME) + ")";
         ctx.fillRect(0, 0, W, H);
@@ -566,6 +660,7 @@
       ctx.restore();
       drawHud(view);
       drawControls(view);
+      if (game.picker && game.status === "playing") drawPicker(game, t);
       const screen = view.menu && view.menu.screen;
       if (screen === "initials") drawInitials(view);
       else if (game.status === "over" || screen === "results") drawResults(view);
