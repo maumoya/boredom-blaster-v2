@@ -1,1 +1,1 @@
-{"v":"599c652","scripts":["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/assets.js","src/ui.js","src/worlds.js","src/render.js","src/main.js"]}
+{"v":"701e30b","scripts":["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/playStats.js","src/assets.js","src/ui.js","src/worlds.js","src/render.js","src/main.js"]}

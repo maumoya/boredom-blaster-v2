@@ -2,7 +2,7 @@
 // patterns, wave scripts (waves 1-11, then the cycle repeats faster) and enemy fire.
 // Plain script; game.js calls it through globalThis.BBEnemies. Randomness comes from game.rng.
 (function (root) {
-  const FIELD = { w: 480, h: 640 };
+  const FIELD = { w: 480, h: root.BB_FIELD_H || 640 };
   const EDGE = 24; // non-formation enemies never go closer than this to the left/right wall
   const CYCLE_LENGTH = 11;
   const CYCLE_SPEEDUP = 0.2; // each finished cycle makes everything 20% faster
@@ -45,11 +45,21 @@
     11: { drones: [8, 3], groups: [["wasp", 4], ["viper", 4], ["diver", 4], ["splitter", 3]] },
   };
 
-  const cycleOf = (wave) => Math.floor((Math.max(1, wave) - 1) / CYCLE_LENGTH);
-  const waveInCycle = (wave) => ((Math.max(1, wave) - 1) % CYCLE_LENGTH) + 1;
-  const speedMult = (wave) => 1 + CYCLE_SPEEDUP * cycleOf(wave);
+  // Every world (100 waves) starts the ramp again from its own wave 1; each later world is 10 % faster
+  // and its wave 100 is the world boss (both bosses, tougher each world).
+  const WAVES_PER_WORLD = 100;
+  const WORLD_SPEEDUP = 0.1;
+  const WORLD_BOSS = { drones: [6, 2], groups: [["orbiter", 1], ["dasher", 1], ["wasp", 4]] };
+  const worldIndex = (wave) => Math.floor((Math.max(1, Math.floor(wave) || 1) - 1) / WAVES_PER_WORLD);
+  const waveInWorld = (wave) => ((Math.max(1, Math.floor(wave) || 1) - 1) % WAVES_PER_WORLD) + 1;
+  const worldBossHp = (wave) => 2 + worldIndex(wave); // x HP of a world boss
+
+  const cycleOf = (wave) => Math.floor((waveInWorld(wave) - 1) / CYCLE_LENGTH);
+  const waveInCycle = (wave) => ((waveInWorld(wave) - 1) % CYCLE_LENGTH) + 1;
+  const speedMult = (wave) => (1 + CYCLE_SPEEDUP * cycleOf(wave)) * (1 + WORLD_SPEEDUP * worldIndex(wave));
 
   function fireRate(wave) {
+    wave = waveInWorld(wave);
     if (wave < FIRE.firstWave) return 0;
     return Math.min(FIRE.start + FIRE.perWave * (wave - FIRE.firstWave), FIRE.max);
   }
@@ -59,9 +69,10 @@
   const shotRate = (wave) => fireRate(wave) * fireMult(wave);
 
   function waveScript(wave) {
-    const s = WAVE_SCRIPTS[waveInCycle(wave)];
+    const worldBoss = waveInWorld(wave) === WAVES_PER_WORLD;
+    const s = worldBoss ? WORLD_BOSS : WAVE_SCRIPTS[waveInCycle(wave)];
     return {
-      wave, cycle: cycleOf(wave), speed: speedMult(wave),
+      wave, cycle: cycleOf(wave), speed: speedMult(wave), worldBoss,
       drones: { cols: s.drones[0], rows: s.drones[1] },
       groups: s.groups.map(([species, count]) => ({ species, count })),
       boss: s.groups.map((g) => g[0]).find((k) => SPECIES[k].boss) || null,
@@ -155,6 +166,10 @@
     const out = [];
     for (const g of script.groups) {
       for (let i = 0; i < g.count; i++) out.push(spawnOne(game, g.species, i, g.count, out.length));
+    }
+    if (script.worldBoss) {
+      const k = worldBossHp(script.wave);
+      for (const e of out) if (e.boss) { e.hp = e.maxHp = e.hp * k; e.points *= k; e.worldBoss = true; }
     }
     return out;
   }
@@ -288,6 +303,7 @@
 
   root.BBEnemies = {
     FIELD, EDGE, CYCLE_LENGTH, CYCLE_SPEEDUP, ENEMY_BULLET, SPECIES, BOSSES, WAVE_SCRIPTS,
+    WAVES_PER_WORLD, WORLD_SPEEDUP, WORLD_BOSS, worldIndex, waveInWorld, worldBossHp,
     cycleOf, waveInCycle, speedMult, fireRate, fireMult, shotRate, CYCLE_FIREUP, waveScript, clampX, catmullRom, triangle, TIMED,
     createEnemy, entryPath, spawnEnemies, splitChildren, damage, updateEnemies, moveBullets,
   };

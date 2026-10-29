@@ -3,9 +3,9 @@
 // Plain script; main.js calls BBRender.createRenderer(ctx, assets). Tests drive it with a stub canvas.
 (function (root) {
   const UI = root.BBUI, N = UI.NEON; // shared neon palette and type
-  const W = 480, H = 640;
-  const HUD_H = 36; // one-row top bar: lives, score, mute, pause
-  const CONTROLS_ALPHA = 0.7; // the floating buttons are see-through
+  const W = 480, H = root.BB_FIELD_H || 640; // index.html sets the full-screen height; 640 in tests
+  const HUD_H = 60; // the floating top panel: lives, score, mute, pause; then wave, skills, shield, BOOM
+  const CONTROLS_ALPHA = 0.4; // the floating buttons are see-through (0.65 while pressed)
   const NEBULA = [ // drifting colour clouds: x, y, radius, colour, drift speed
     { x: 0.2, y: 0.25, r: 190, c: "90,60,200", v: 6 }, { x: 0.8, y: 0.55, r: 220, c: "30,120,200", v: 4 },
     { x: 0.5, y: 0.9, r: 200, c: "190,50,140", v: 5 },
@@ -22,6 +22,11 @@
     device: { x: 250, y: 160, w: 160, h: 28, label: "THIS DEVICE" },
   };
   const MAX_PARTICLES = 400;
+  const HIT_FLASH_TIME = 0.06; // seconds an enemy stays white after a hit
+  const SLOW_FRAME = 0.02; // a frame longer than this steps the effects down
+  const FX_RECOVER = 1.5; // seconds of quick frames before the effects step back up
+  const BLOOM_LIFE = 0.5;
+  const DEFAULT_HALO = "120,90,255";
   const STAR_LAYERS = [
     { count: 30, speed: 18, size: 1, sprite: null },
     { count: 18, speed: 40, size: 2, sprite: null },
@@ -76,6 +81,10 @@
     let info = null; // the world of the current wave (src/worlds.js), set each frame
     const particles = [];
     const rings = []; // explosion shockwaves
+    const blooms = []; // explosion bloom: layered radial gradients
+    const hitFlash = new WeakMap(); // enemy -> seconds of white flash left
+    const lastHp = new WeakMap(); // enemy -> hp seen last frame
+    const fx = { full: true, calm: 0 }; // full effects, or stepped down after a slow frame
     const ui = root.BBUI.createUI(ctx);
     // without the assets script loaded (some tests) the ships are simply skipped
     const shipArt = root.BBAssets
@@ -125,23 +134,71 @@
     const rankColor = (rank, t) => (rank === "rainbow" ? rainbow(t) : rank === "heart" ? N.red : RANK_COLOR[rank] || "#fff");
     const center = (e) => [e.x + e.w / 2, e.y + e.h / 2];
 
+    // "#rgb" / "#rrggbb" -> "r,g,b" for rgba() strings
+    function rgbOf(hex) {
+      const h = String(hex).replace("#", "");
+      const f = h.length === 3 ? h.replace(/./g, "$&$&") : h;
+      return [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16) || 0).join(",");
+    }
+
     // ---- effects state ----
+    function emit(p) { // every particle goes through here, so the cap holds
+      if (particles.length < MAX_PARTICLES) particles.push({ ...p, max: p.life });
+    }
     function explode(x, y, big) {
-      const n = big ? 64 : 22;
+      const n = (big ? 64 : 22) >> (fx.full ? 0 : 1);
       rings.push({ x, y, life: SHOCK.life, max: SHOCK.life, radius: big ? SHOCK.bigRadius : SHOCK.radius });
-      for (let i = 0; i < n && particles.length < MAX_PARTICLES; i++) {
+      if (fx.full) blooms.push({ x, y, life: BLOOM_LIFE, max: BLOOM_LIFE, radius: big ? 130 : 52 });
+      for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2 + i * 0.7, v = (big ? 220 : 140) * (0.4 + ((i * 37) % 10) / 10);
-        const life = 0.5 + ((i * 13) % 5) * 0.08;
-        particles.push({
-          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life,
+        emit({
+          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.5 + ((i * 13) % 5) * 0.08,
           color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? N.yellow : "#f74", size: (big ? 6 : 4) + (i % 3),
         });
       }
+      const chunks = fx.full ? (big ? 12 : 6) : 0; // larger debris that lingers
+      for (let i = 0; i < chunks; i++) {
+        const a = (i / chunks) * Math.PI * 2 + 0.5, v = (big ? 120 : 80) * (0.5 + ((i * 29) % 7) / 7);
+        emit({
+          x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.7 + ((i * 11) % 4) * 0.08,
+          color: i % 2 ? "#c86" : "#999", size: (big ? 10 : 8) + (i % 3) * 2, debris: true,
+        });
+      }
+    }
+    // a few quick sparks where an enemy was hit
+    function sparks(x, y) {
+      const n = fx.full ? 6 : 2;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + x * 0.13, v = 150 + ((i * 41) % 5) * 30;
+        emit({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.25, color: i % 2 ? "#fff" : N.yellow, size: 2 });
+      }
+    }
+    // enemies whose hp dropped flash white for a moment and throw sparks
+    function trackHits(drones, dt) {
+      for (const d of drones) {
+        const left = hitFlash.get(d);
+        if (left > 0) hitFlash.set(d, left - dt);
+        if (typeof d.hp !== "number") continue;
+        const was = lastHp.get(d);
+        if (was !== undefined && d.hp < was) {
+          hitFlash.set(d, HIT_FLASH_TIME);
+          sparks(d.x + d.w / 2, d.y + d.h / 2);
+        }
+        lastHp.set(d, d.hp);
+      }
+    }
+    // a slow frame steps the effects down; a second and a half of quick frames brings them back
+    function stepEffects(dt) {
+      if (dt > SLOW_FRAME) { fx.full = false; fx.calm = 0; return; }
+      fx.calm += dt;
+      if (fx.calm >= FX_RECOVER) fx.full = true;
     }
 
     // Reads the game each frame: vanished enemies explode, a lost life flashes the screen.
     function update(dt, game) {
       if (!reducedMotion) scroll += dt; // drift
+      stepEffects(dt);
+      trackHits(game.drones, dt);
       const alive = new Set(game.drones);
       for (const d of prev.drones) {
         if (!alive.has(d)) explode(d.x + d.w / 2, d.y + d.h / 2, !!d.boss);
@@ -152,15 +209,22 @@
       }
       if ((game.nukes || 0) > prev.nukes && !reducedMotion) Object.assign(shake, { time: NUKE_SHAKE.time, max: NUKE_SHAKE.time, mag: NUKE_SHAKE.mag });
       const worlds = root.BBWorlds;
-      info = worlds ? worlds.infoFor(game.wave) : null;
+      // during the warp the old world stays behind until the ship has flown out
+      const warpP = game.warp && root.BB.warpPhase ? root.BB.warpPhase(game.warp.t).name : null;
+      info = worlds ? worlds.infoFor(warpP === "stamp" || warpP === "fly" ? game.wave - 1 : game.wave) : null;
       const cardText = worlds && worlds.titleCard(prev.wave, game.wave);
       if (cardText) card = { text: cardText, life: CARD_TIME };
-      prev = { drones: game.drones.slice(), lives: game.lives, wave: game.wave, nukes: game.nukes || 0 };
+      prev = { drones: game.drones.slice(), lives: game.lives, wave: game.warp ? prev.wave : game.wave, nukes: game.nukes || 0 }; // the world card waits for the warp
       flash.time = Math.max(0, flash.time - dt);
       shake.time = Math.max(0, shake.time - dt);
       if (card) { card.life -= dt; if (card.life <= 0) card = null; }
-      for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+      for (const p of particles) {
+        p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+        if (p.debris) { p.vx *= 0.97; p.vy = p.vy * 0.97 + 60 * dt; }
+      }
       for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
+      for (const b of blooms) b.life -= dt;
+      for (let i = blooms.length - 1; i >= 0; i--) if (blooms[i].life <= 0) blooms.splice(i, 1);
       for (const r of rings) r.life -= dt;
       for (let i = rings.length - 1; i >= 0; i--) if (rings[i].life <= 0) rings.splice(i, 1);
     }
@@ -281,8 +345,10 @@
       const f = 0.8 + 0.2 * Math.sin(t * 40) + 0.1 * Math.sin(t * 23);
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const layers = ultra ? [[8, 28, "rgba(255,40,20,0.85)"], [4, 16, "rgba(255,150,60,0.95)"]]
-        : [[7, 22, "rgba(255,120,30,0.8)"], [4, 14, "rgba(255,230,120,0.95)"]];
+      glow(cx, baseY + 12, ultra ? 34 : 28, ultra ? "255,50,20" : "255,140,50", 0.45 * f); // soft halo behind the flame
+      glow(cx, baseY + 4, 14, "255,240,200", 0.5 * f);
+      const layers = ultra ? [[8, 28, "rgba(255,40,20,0.85)"], [4, 16, "rgba(255,150,60,0.95)"], [2, 9, "rgba(255,255,255,0.95)"]]
+        : [[7, 22, "rgba(255,120,30,0.8)"], [4, 14, "rgba(255,230,120,0.95)"], [2, 8, "rgba(255,255,255,0.95)"]];
       for (const [w, len, color] of layers) {
         ctx.beginPath();
         ctx.moveTo(cx - w, baseY);
@@ -293,6 +359,26 @@
       }
       ctx.restore();
     }
+    // a tumbling rock: an uneven polygon with a hot orange edge
+    function drawDebris(d) {
+      const r = d.w / 2, cx = d.x + r, cy = d.y + r;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(d.spin || 0);
+      ctx.beginPath();
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2, k = 0.78 + 0.22 * Math.sin(i * 2.7 + r);
+        ctx[i ? "lineTo" : "moveTo"](Math.cos(a) * r * k, Math.sin(a) * r * k);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "#5a4232";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,170,90,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function drawBackground() {
       ctx.fillStyle = info ? info.sky : "#050514";
       ctx.fillRect(0, 0, W, H);
@@ -318,6 +404,12 @@
       const [cx, cy] = center(e);
       const w = e.w * (e.boss ? 1.1 : SPRITE_SCALE);
       const tinted = info && (info.world > 1 || info.loop > 0);
+      const halo = info ? info.tint.halo : DEFAULT_HALO;
+      ctx.save(); // glow outline in the world tint
+      ctx.globalCompositeOperation = "lighter";
+      glow(cx, cy, w * 0.85, halo, 0.22);
+      circle(cx, cy, w * 0.46, null, "rgba(" + halo + ",0.55)", 2);
+      ctx.restore();
       if (tinted) { // each world tints its enemies: a halo everywhere, a hue shift where the canvas has filters
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
@@ -328,6 +420,13 @@
       }
       shipArt.draw(ctx, e.species || "drone", cx, cy, w);
       if (tinted) ctx.restore();
+      if (hitFlash.get(e) > 0) { // white hit flash
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        glow(cx, cy, w * 0.75, "255,255,255", 0.9);
+        circle(cx, cy, w * 0.3, "rgba(255,255,255,0.6)");
+        ctx.restore();
+      }
     }
 
     // MASTERED projectiles glow gold, ULTRA-MAD ones red-hot; ULTRA-MAD faster shots leave a trail
@@ -380,9 +479,9 @@
     function glowRect(b, name, color) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
-      sprite(name, b.x + b.w / 2, b.y + b.h / 2, b.w * 2.2, () => {
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2; // gradient glow, no costly blur
+      glow(cx, cy, Math.max(b.w, b.h) * 1.6 + 6, rgbOf(color), 0.55);
+      sprite(name, cx, cy, b.w * 2.2, () => {
         ctx.fillStyle = color;
         ctx.fillRect(b.x, b.y, b.w, b.h);
       });
@@ -416,6 +515,11 @@
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
       const dmg = Math.max(0, Math.min(3, 3 - game.lives));
       shipArt.draw(ctx, "player", cx, cy, s.w * 1.6, { dmg });
+      ctx.save(); // rim light around the hull
+      ctx.globalCompositeOperation = "lighter";
+      glow(cx, cy, s.w * 0.95, "47,243,255", 0.18);
+      circle(cx, cy - 2, s.w * 0.78, null, "rgba(190,250,255,0.5)", 1.5);
+      ctx.restore();
       if (game.superStar > 0) circle(cx, cy, 26, null, rainbow(t), 3);
       if (game.shield > 0) { // shield ring, fainter as it is used up
         ctx.globalAlpha = 0.4 + 0.2 * game.shield;
@@ -545,6 +649,169 @@
       ctx.fillRect(0, 0, W, H);
     }
 
+    // between worlds: a red X stamp and WORLD CLEAR on the beaten boss, then the route map to the next world
+    function drawWarp(game, t) {
+      const w = game.warp, p = root.BB.warpPhase(w.t), worlds = root.BBWorlds;
+      if (p.name === "stamp" || p.name === "fly") {
+        const k = p.name === "stamp" ? p.k : 1, alpha = p.name === "fly" ? 1 - p.k : Math.min(1, k * 4);
+        const size = 70 * (1 + Math.max(0, 1 - k * 3) * 1.5); // slams down from 2.5x
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(w.x, w.y);
+        ctx.rotate(-0.12);
+        ctx.strokeStyle = "#ff2a3a";
+        ctx.lineCap = "round";
+        ctx.shadowColor = "#ff2a3a";
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = size * 0.22;
+        ctx.beginPath();
+        ctx.moveTo(-size / 2, -size / 2); ctx.lineTo(size / 2, size / 2);
+        ctx.moveTo(size / 2, -size / 2); ctx.lineTo(-size / 2, size / 2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = "rgba(0,0,10,0.6)";
+        ctx.fillRect(0, 300, W, 64);
+        text("WORLD CLEAR", W / 2, 344, 30, "#ffe27a", "center");
+        ctx.restore();
+        return;
+      }
+      if (p.name !== "map" && p.name !== "fade") return;
+      const n = worlds ? worlds.WORLDS.length : 5, from = ((w.from % n) + n) % n, to = w.to % n;
+      const alpha = p.name === "fade" ? 1 - p.k : Math.min(1, p.k * 5);
+      const info = (i) => (worlds ? worlds.WORLDS[i] : { name: "World " + (i + 1), tint: { halo: "200,200,255" }, feature: "nebula" });
+      const cy = H / 2 - 10, spread = Math.min(1.4, Math.max(1, (H - 260) / 520)); // taller phones get a longer trip
+      // the trip climbs the screen: one planet per world, bottom to top
+      const planets = [[110, 205, 38], [365, 95, 32], [125, -20, 44], [372, -135, 34], [205, -250, 40]]
+        .slice(0, n).map(([x, y, r]) => ({ x, y: cy + y * spread, r }));
+      const leg = (i) => { // quadratic curve from planet i to i + 1, bowed toward the middle
+        const a = planets[i], b = planets[i + 1];
+        return { a, b, c: { x: (a.x + b.x) / 2 + (i % 2 ? 120 : -120), y: (a.y + b.y) / 2 + 40 } };
+      };
+      const at = (L, k) => ({
+        x: (1 - k) * (1 - k) * L.a.x + 2 * (1 - k) * k * L.c.x + k * k * L.b.x,
+        y: (1 - k) * (1 - k) * L.a.y + 2 * (1 - k) * k * L.c.y + k * k * L.b.y,
+      });
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      // deep space: dark sky, a soft nebula behind the destination, drifting stars
+      ctx.fillStyle = "#020310";
+      ctx.fillRect(0, 0, W, H);
+      const dest = planets[to] || planets[0];
+      const neb = ctx.createRadialGradient(dest.x, dest.y, 10, dest.x, dest.y, 300);
+      neb.addColorStop(0, "rgba(" + info(to).tint.halo + ",0.28)");
+      neb.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = neb;
+      ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < 110; i++) {
+        const sx = frac(i + 1, 337) * W, sy = (frac(i + 1, 733) * H + w.t * (6 + 14 * frac(i, 91))) % H;
+        ctx.fillStyle = "rgba(255,255,255," + (0.25 + 0.6 * frac(i, 577)) + ")";
+        ctx.fillRect(sx, sy, i % 9 ? 1.5 : 2.5, i % 9 ? 1.5 : 2.5);
+      }
+      // the route: dotted ahead, glowing where the ship has flown
+      for (let i = 0; i < n - 1; i++) {
+        const L = leg(i), flown = i < from;
+        ctx.save();
+        ctx.setLineDash(flown ? [] : [3, 9]);
+        ctx.lineCap = "round";
+        ctx.strokeStyle = flown ? "rgba(120,230,255,0.75)" : "rgba(200,220,255,0.35)";
+        ctx.lineWidth = flown ? 3 : 2;
+        if (flown) { ctx.shadowColor = "#3df2ff"; ctx.shadowBlur = 10; }
+        ctx.beginPath();
+        ctx.moveTo(L.a.x, L.a.y);
+        ctx.quadraticCurveTo(L.c.x, L.c.y, L.b.x, L.b.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+      planets.forEach((pl, i) => drawPlanet(pl, info(i), i, t, i < to, i === to));
+      // the ship flies the leg from the cleared world to the next, leaving an engine trail
+      const k = p.name === "fade" ? 1 : Math.min(1, p.k * 1.25), e = k * k * (3 - 2 * k);
+      if (to === from + 1) {
+        const L = leg(from);
+        for (let j = 12; j >= 1; j--) {
+          const q = at(L, Math.max(0, e - j * 0.018));
+          circle(q.x, q.y, 1 + (12 - j) * 0.35, "rgba(255," + (150 + j * 8) + ",80," + (0.5 - j * 0.035) + ")");
+        }
+        const m = at(L, e), m2 = at(L, Math.min(1, e + 0.01));
+        ctx.save();
+        ctx.translate(m.x, m.y);
+        ctx.rotate(Math.atan2(m2.y - m.y, m2.x - m.x) + Math.PI / 2);
+        ctx.shadowColor = "#3df2ff";
+        ctx.shadowBlur = 14;
+        shipArt.draw(ctx, "player", 0, 0, 34);
+        ctx.restore();
+      }
+      text("WORLD " + (from + 1) + "  >  WORLD " + (to + 1), W / 2, 70, 15, "rgba(160,215,255,0.85)", "center");
+      text("NEXT STOP", W / 2, H - 110, 14, "rgba(255,255,255,0.6)", "center");
+      text(info(to).name.toUpperCase(), W / 2, H - 78, 28, "#ffe27a", "center");
+      ctx.restore();
+    }
+
+    // one planet per world, drawn from its theme: gas giant, ringed ice, burning sun, crystal, black hole
+    function drawPlanet(pl, info, i, t, done, next) {
+      const { x, y, r } = pl, halo = info.tint.halo;
+      ctx.save();
+      if (next) { // the destination pulses
+        ctx.strokeStyle = "rgba(" + halo + "," + (0.5 + 0.3 * Math.sin(t * 5)) + ")";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, r + 12 + 3 * Math.sin(t * 5), 0, Math.PI * 2); ctx.stroke();
+      }
+      const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, r * 1.9);
+      glow.addColorStop(0, "rgba(" + halo + ",0.35)");
+      glow.addColorStop(1, "rgba(" + halo + ",0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(x, y, r * 1.9, 0, Math.PI * 2); ctx.fill();
+      const ring = (tilt, color, width) => {
+        ctx.save(); ctx.translate(x, y); ctx.rotate(tilt); ctx.scale(1, 0.28);
+        ctx.strokeStyle = color; ctx.lineWidth = width;
+        ctx.beginPath(); ctx.arc(0, 0, r * 1.6, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      };
+      if (info.feature === "blackhole") {
+        ring(-0.25, "rgba(255,170,80,0.85)", 5);
+        circle(x, y, r * 0.8, "#000", "rgba(255,200,120,0.9)", 2);
+      } else {
+        if (info.feature === "ice") ring(-0.35, "rgba(200,235,255,0.6)", 4);
+        const body = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, r * 0.1, x, y, r);
+        const lit = { nebula: "#c7a4ff", ice: "#e6f6ff", sun: "#fff1a8", crystals: "#a6ffe3" }[info.feature] || "#ddd";
+        const mid = { nebula: "#6b3fd0", ice: "#5aa8e0", sun: "#ff7a1a", crystals: "#1fae8c" }[info.feature] || "#888";
+        const dark = { nebula: "#1e0f4a", ice: "#0e2c52", sun: "#a3200a", crystals: "#063a32" }[info.feature] || "#222";
+        body.addColorStop(0, lit); body.addColorStop(0.55, mid); body.addColorStop(1, dark);
+        ctx.fillStyle = body;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+        if (info.feature === "nebula") { // gas bands
+          ctx.fillStyle = "rgba(255,255,255,0.12)";
+          for (let b = -2; b <= 2; b++) ctx.fillRect(x - r, y + b * r * 0.38 - 3, r * 2, 6);
+        } else if (info.feature === "crystals") { // facets
+          ctx.strokeStyle = "rgba(220,255,245,0.35)"; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(x - r, y - r * 0.2); ctx.lineTo(x + r * 0.2, y - r); ctx.moveTo(x - r * 0.3, y + r); ctx.lineTo(x + r, y - r * 0.1);
+          ctx.moveTo(x - r * 0.6, y - r * 0.6); ctx.lineTo(x + r * 0.5, y + r * 0.7); ctx.stroke();
+        } else if (info.feature === "sun") { // flares
+          ctx.fillStyle = "rgba(255,240,180,0.25)";
+          for (let s = 0; s < 4; s++) { ctx.beginPath(); ctx.arc(x + Math.cos(s * 1.7 + t) * r * 0.5, y + Math.sin(s * 2.3 + t) * r * 0.5, r * 0.22, 0, Math.PI * 2); ctx.fill(); }
+        }
+        ctx.restore();
+        if (info.feature === "ice") { // front half of the ring over the planet
+          ctx.save(); ctx.translate(x, y); ctx.rotate(-0.35); ctx.scale(1, 0.28);
+          ctx.strokeStyle = "rgba(220,245,255,0.75)"; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.arc(0, 0, r * 1.6, 0.1, Math.PI - 0.1); ctx.stroke(); ctx.restore();
+        }
+        if (info.feature === "crystals") circle(x + Math.cos(t * 1.4) * r * 1.5, y + Math.sin(t * 1.4) * r * 0.5, 5, "#c9fff0");
+      }
+      if (done) { // cleared: a red X stamped on it
+        ctx.save(); ctx.translate(x, y); ctx.rotate(-0.12);
+        ctx.strokeStyle = "#ff2a3a"; ctx.lineCap = "round"; ctx.lineWidth = r * 0.22;
+        ctx.shadowColor = "#ff2a3a"; ctx.shadowBlur = 10;
+        const s2 = r * 0.55;
+        ctx.beginPath(); ctx.moveTo(-s2, -s2); ctx.lineTo(s2, s2); ctx.moveTo(s2, -s2); ctx.lineTo(-s2, s2); ctx.stroke();
+        ctx.restore();
+      }
+      const right = x < W / 2;
+      text(info.name.toUpperCase(), x + (right ? r + 16 : -r - 16), y + 5, 13, next ? "#fff" : done ? "rgba(255,140,140,0.8)" : "rgba(255,255,255,0.5)", right ? "left" : "right");
+      ctx.restore();
+    }
+
     // "WORLD 2: FROST BELT" fading in and out
     function drawCard() {
       const age = CARD_TIME - card.life, alpha = Math.max(0, Math.min(1, age / 0.4, card.life / 0.6));
@@ -556,7 +823,21 @@
       ctx.restore();
     }
 
+    // explosion bloom: white core, yellow body and orange fringe as three radial gradients
+    function drawBlooms() {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (const b of blooms) {
+        const k = 1 - b.life / b.max, fade = 1 - k, r = b.radius * (0.5 + 0.7 * k);
+        glow(b.x, b.y, r, "255,110,30", 0.55 * fade);
+        glow(b.x, b.y, r * 0.65, "255,220,90", 0.7 * fade);
+        glow(b.x, b.y, r * 0.3, "255,255,255", 0.9 * fade);
+      }
+      ctx.restore();
+    }
+
     function drawParticles() {
+      drawBlooms();
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (const p of particles) {
@@ -569,14 +850,33 @@
     }
 
     // ---- HUD ----
+    // boss fight: the boss's life on the right half, the player's ship life and shield on the left half
     function drawBossBar(game) {
       const boss = game.drones.find((d) => d.boss && !d.entry && !(d.delay > 0));
       if (!boss) return;
-      const x = 60, y = HUD_H + 8, w = W - 120, h = 10, frac = Math.max(0, boss.hp / boss.maxHp);
-      panel(x - 2, y - 2, w + 4, h + 4, "rgba(0,0,0,0.6)", "#f66");
+      const y = HUD_H + 8, h = 10, frac = Math.max(0, boss.hp / boss.maxHp);
+      const bx = W / 2 + 4, bw = W - 12 - bx;
+      ctx.fillStyle = "rgba(4,6,20,0.72)";
+      ctx.fillRect(bx - 2, y - 2, bw + 4, h + 4);
       ctx.fillStyle = frac > 0.3 ? "#e44" : "#fa3";
-      ctx.fillRect(x, y, w * frac, h);
-      text("BOSS", 12, y + 9, 11, "#f88");
+      ctx.fillRect(bx + bw * (1 - frac), y, bw * frac, h); // drains toward the centre
+      text(game.drones.some((d) => d.worldBoss) ? "WORLD BOSS" : "BOSS", W - 12, y + h + 13, 11, "#f88", "right");
+      // player: one segment per life (9 at most), and a silver shield that lights up when it saves the ship
+      const lives = Math.max(0, game.lives), segs = Math.min(9, Math.max(lives, 1)), lx = 30, lw = W / 2 - 4 - lx, gap = 2;
+      const sw = (lw - gap * (segs - 1)) / segs;
+      ctx.fillStyle = "rgba(4,6,20,0.72)";
+      ctx.fillRect(lx - 2, y - 2, lw + 4, h + 4);
+      for (let i = 0; i < segs; i++) {
+        ctx.fillStyle = i < lives ? N.cyan : "rgba(255,255,255,0.12)";
+        ctx.fillRect(lx + i * (sw + gap), y, sw, h);
+      }
+      if (lives > 9) text("×" + lives, lx + lw, y + h + 13, 11, N.cyan, "right");
+      const flash = Math.max(0, Math.min(1, (game.shieldFlash || 0) / 0.5));
+      ctx.save();
+      if (flash > 0 && !reducedMotion) { ctx.shadowColor = "#fff"; ctx.shadowBlur = 16 * flash; }
+      ui.icon("shield", 16, y + h / 2, 13, flash > 0 ? "#ffffff" : game.shield > 0 ? RANK_COLOR.silver : "rgba(200,200,210,0.35)");
+      ctx.restore();
+      text("YOU", lx, y + h + 13, 11, N.cyan);
     }
 
     // speaker icon left of the pause button; a cross over it while everything is muted
@@ -613,22 +913,6 @@
       });
     }
 
-    // wave, skill families, shield pips and BOOM charges on one line: under the controls zone in Below layout,
-    // along the bottom edge of the playfield in Overlay (the buttons end above it)
-    function bottomLineY(view) {
-      const layout = view.touch && view.touch.layout ? view.touch.layout() : null;
-      return layout && layout.zoneH ? H + layout.zoneH - root.BBInput.STRIP_H / 2 : H - 10;
-    }
-    function drawBottomLine(view) {
-      const { game } = view, R = root.BB.R(), y = bottomLineY(view);
-      text("WAVE " + game.wave, 8, y + 4, 12, "#fff");
-      drawSkillRow(game, y);
-      ui.icon("shield", 306, y, 12, RANK_COLOR.silver);
-      for (let i = 0; i < R.SHIELD.max; i++) circle(318 + i * 8, y, 2.6, i < game.shield ? RANK_COLOR.silver : "rgba(255,255,255,0.2)");
-      ui.icon("boom", 372, y, 12, N.yellow);
-      for (let i = 0; i < root.BB.KABOOM.maxCharges; i++) circle(386 + i * 9, y, 3, i < game.kaboomCharges ? N.yellow : "rgba(255,255,255,0.2)");
-    }
-
     // the skill picker: seven cards, the game keeps running at 15 % behind it
     function drawPicker(game, t) {
       const S = root.BBSkills;
@@ -652,11 +936,25 @@
       });
     }
 
+    // the floating top panel: darker see-through fill, a faint border, no divider lines
+    function hudPanel(x, y, w, h, r) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+      ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(4,6,20,0.72)";
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(140,200,255,0.18)";
+      ctx.stroke();
+      ctx.restore();
+    }
     function drawHud(view) {
       const { game } = view, t = view.time || 0;
       const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
-      ui.panel(0, 0, W, HUD_H, { radius: 0, stroke: N.violet });
-      // one row: lives left, big score in the middle, mute and pause right
+      hudPanel(4, 2, W - 8, HUD_H - 4, 12);
+      // row 1: lives left, big score in the middle, mute and pause right
       ui.icon("heart", 18, 18, 20, N.red);
       text("×" + Math.max(0, game.lives), 32, 24, 16, "#fff");
       text(String(game.score).padStart(6, "0"), W / 2, 27, 24, "#fff", "center");
@@ -664,9 +962,17 @@
       ui.button(P.x, P.y, P.w, P.h, "", paused ? "pressed" : "idle");
       ui.icon("pause", P.x + P.w / 2, P.y + P.h / 2 + (paused ? 2 : 0), 16, "#fff");
       drawSpeaker(!!view.muted);
-      if (game.superStar > 0) { // rainbow timer along the bottom edge of the bar
+      // row 2: wave, skill families, shield pips and BOOM charges
+      const y = 44;
+      text("WAVE " + (root.BBEnemies && root.BBEnemies.waveInWorld ? root.BBEnemies.waveInWorld(game.wave) : game.wave), 12, y + 4, 12, "#fff"); // the wave inside its world
+      drawSkillRow(game, y);
+      ui.icon("shield", 306, y, 12, game.shieldFlash > 0 ? "#ffffff" : RANK_COLOR.silver);
+      for (let i = 0; i < R.SHIELD.max; i++) circle(318 + i * 8, y, 2.6, i < game.shield ? RANK_COLOR.silver : "rgba(255,255,255,0.2)");
+      ui.icon("boom", 400, y, 12, N.yellow);
+      for (let i = 0; i < root.BB.KABOOM.maxCharges; i++) circle(414 + i * 9, y, 3, i < game.kaboomCharges ? N.yellow : "rgba(255,255,255,0.2)");
+      if (game.superStar > 0) { // rainbow timer along the bottom edge of the panel
         ctx.fillStyle = rainbow(t);
-        ctx.fillRect(6, HUD_H - 5, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
+        ctx.fillRect(14, HUD_H - 6, (W - 28) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 2);
       }
       drawBossBar(game);
     }
@@ -677,18 +983,26 @@
       const layout = touch && touch.layout ? touch.layout() : null;
       const held = (name) => !!touch && touch.isHeld(name);
       if (layout && layout.zoneH) { // the controls zone under the playfield
-        ctx.fillStyle = "#070b1e";
-        ctx.fillRect(0, H, W, layout.zoneH);
+        const zoneH = Math.max(layout.zoneH, logicalHeight(layout) - H); // down to the very bottom of the stretched canvas
+        const zg = ctx.createLinearGradient(0, H, 0, H + zoneH); // no flat dark block under the buttons
+        if (zg && typeof zg.addColorStop === "function") {
+          zg.addColorStop(0, "#070b1e"); zg.addColorStop(0.6, "#0b1236"); zg.addColorStop(1, "#14104a");
+          ctx.fillStyle = zg;
+        } else ctx.fillStyle = "#0b1236";
+        ctx.fillRect(0, H, W, zoneH);
+        glow(W / 2, H + zoneH / 2, Math.min(W * 0.6, zoneH / 2), "100,70,255", 0.25); // stays inside the filled zone
         ctx.fillStyle = "rgba(77,221,255,0.5)";
         ctx.fillRect(0, H, W, 2);
       }
       if (view.padConnected) return; // a physical controller replaces the touch buttons
       const t = view.time || 0, glowing = !reducedMotion;
       ctx.save();
-      ctx.globalAlpha = layout && layout.zoneH ? 1 : CONTROLS_ALPHA; // in the overlay the rings float see-through
+      ctx.globalAlpha = CONTROLS_ALPHA; // the rings float see-through over the game
 
       const firing = held("fire") || !!view.firing;
+      ctx.globalAlpha = firing ? 0.65 : CONTROLS_ALPHA;
       ui.ringButton(B.fire.x, B.fire.y, B.fire.r, "fire", { state: firing ? "pressed" : "idle", color: "#ff7a5a", ready: glowing, time: t });
+      ctx.globalAlpha = CONTROLS_ALPHA;
 
       const progress = Math.max(0, Math.min(1, 1 - game.specialCooldown / BB.SPECIAL.cooldown));
       const justFired = game.specialCooldown > BB.SPECIAL.cooldown - 0.15;
@@ -737,7 +1051,7 @@
     // ---- screens ----
     function dim(alpha) {
       ctx.fillStyle = "rgba(0,0,10," + alpha + ")";
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(0, -H, W, H * 3); // covers the whole screen, also under the menus' centring shift
     }
 
     // 1 when motion is reduced, otherwise a slow breathing scale around 1
@@ -760,7 +1074,7 @@
     function drawPause(menu) {
       dim(0.65);
       ui.title("PAUSED", W / 2, 230, 36);
-      const L = root.BBInput.MENU_LAYOUT, icons = ["play", "weapon", "escort", "boom"];
+      const L = root.BBInput.MENU_LAYOUT, icons = ["play", "weapon", "escort", "boom", "star"];
       menu.items().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
     }
 
@@ -775,6 +1089,8 @@
       const icons = ["play", "star", "weapon"];
       menu.titleItems().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
       text("BEST " + (view.best || 0), W / 2, 500, 16, N.yellow, "center");
+      const playedLine = globalThis.BBPlayStats ? BBPlayStats.line(view.played) : "";
+      if (playedLine) text(playedLine, W / 2, 522, 11, "rgba(255,255,255,0.6)", "center");
     }
 
     // top-10 table: rank, initials, score, wave; the freshly added row blinks until view.highlight.until
@@ -892,8 +1208,17 @@
     }
 
     // view: { game, menu, best, touch, touchSeen, time, scores, results }
+    // game units tall the canvas box really is: on a phone it is stretched taller than H + zoneH (rect.height * W / rect.width)
+    function logicalHeight(layout) {
+      const rect = ctx.canvas && typeof ctx.canvas.getBoundingClientRect === "function" ? ctx.canvas.getBoundingClientRect() : null;
+      const boxH = rect && rect.width > 0 ? (rect.height * W) / rect.width : 0;
+      return Math.max(boxH, H + (layout && layout.zoneH ? layout.zoneH : 0));
+    }
+
     function draw(view) {
       const game = view.game, t = view.time || 0;
+      const touchLayout = view.touch && view.touch.layout ? view.touch.layout() : null;
+      ctx.clearRect(0, 0, W, logicalHeight(touchLayout)); // the whole canvas first, so no glow ever stacks between frames
       ctx.save();
       if (shake.time > 0) { // wobble that fades out
         const k = shake.time / shake.max;
@@ -905,6 +1230,7 @@
       for (const e of game.escorts) drawEscort(e);
       for (const b of game.bullets) drawBullet(b);
       for (const b of game.enemyBullets) glowRect(b, "enemyBullet", N.red);
+      for (const d of game.debris || []) drawDebris(d);
       drawLaser(game, t);
       drawShip(game, t);
       drawTwin(game, t);
@@ -926,10 +1252,12 @@
       ctx.restore();
       drawHud(view);
       drawControls(view);
-      drawBottomLine(view);
-      if (card && game.status === "playing") drawCard();
+      if (game.warp) drawWarp(game, t);
+      if (card && game.status === "playing" && !game.warp) drawCard();
       if (game.picker && game.status === "playing") drawPicker(game, t);
       const screen = view.menu && view.menu.screen;
+      ctx.save();
+      if (root.BBInput.MENU_DY) ctx.translate(0, root.BBInput.MENU_DY); // menu screens are laid out 640 tall, centred on a tall screen
       if (screen === "initials") drawInitials(view);
       else if (game.status === "over" || screen === "results") drawResults(view);
       else if (screen === "title") { drawTitle(view); drawGear(view.menu); }
@@ -937,10 +1265,12 @@
       else if (screen === "pause") { drawPause(view.menu); drawGear(view.menu); }
       else if (screen === "settings") drawSettings(view.menu);
       else if (screen === "howto") drawHowTo(view.menu);
+      ctx.restore();
     }
 
     return {
       update, draw, explode, particles, pulse,
+      fullEffects: () => fx.full, bloomCount: () => blooms.length,
       setReducedMotion(on) { reducedMotion = !!on; if (reducedMotion) shake.time = 0; },
       isReducedMotion: () => reducedMotion,
     };

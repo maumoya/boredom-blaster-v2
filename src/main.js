@@ -85,6 +85,15 @@
   let highlight = null; // { index, until }: the new row blinks until this time (seconds)
   let picker = null; // the initials picker while a new record is being entered
   let runSeconds = 0; // play time of this run, for the score plausibility check
+  const playLog = BBPlayStats.createClient(); // one anonymous line per run; off under Do Not Track
+  const playLocal = BBPlayStats.createLocal(storage);
+  let played = playLocal.load(); // { runs, seconds } on this device, for the title screen
+  function reportRun(end) { // counts the run here and sends its line; short mis-starts are skipped
+    if (!game || runSeconds < BBPlayStats.MIN_SECONDS) return;
+    played = playLocal.add(runSeconds);
+    const device = BBPlayStats.deviceOf(innerWidth, innerHeight, navigator.maxTouchPoints > 0);
+    playLog.send(BBPlayStats.runEvent(game, runSeconds, end, device));
+  }
   let stats = BBInput.createRunStats(); // goals and boss-wave lives for the results screen
   let results = null;
   const keyboard = BBInput.createKeyboard(keys);
@@ -120,6 +129,7 @@
   const startOpts = () => ({ wave: BBWorlds.startWave(location.search) });
 
   function restart() {
+    if (game && game.status !== "over") reportRun("quit");
     game = BB.restart(startOpts());
     stats = BBInput.createRunStats();
     results = null;
@@ -133,7 +143,8 @@
     if (action === "swap") {
       touch.setLeftHanded(menu.leftHanded);
       store.saveLeftHanded(menu.leftHanded);
-    } else if (action === "restart" || action === "start") restart();
+    } else if (action === "recentre") letGo();
+    else if (action === "restart" || action === "start") restart();
   }
 
   // Enter or OK in the picker saves the record and shows the results with the new row blinking
@@ -192,7 +203,8 @@
     return BBInput.toGamePoint(e.clientX, e.clientY, r);
   }
   // returns true when the click was used by a menu or the game-over screen
-  function handleScreenClick(x, y) {
+  function handleScreenClick(x, y0) {
+    const y = y0 - BBInput.MENU_DY; // menus are drawn shifted down to the screen's centre
     if (menu.screen === "initials") { if (picker.tap(x, y) === "ok") confirmInitials(); return true; }
     if (menu.screen === "results") { restart(); return true; }
     if (menu.screen === "scores") {
@@ -240,6 +252,14 @@
     });
   }
   const letGo = () => BBInput.releaseAll({ touch, mouse, keyboard });
+  // a lifted finger whose pointerup was lost (iPhone): when the last finger leaves the screen nothing can be held.
+  // Pointer ids do not match Touch.identifier, so this counts fingers instead of matching ids.
+  let fingersDown = 0;
+  const reconcileTouches = (e) => {
+    fingersDown = e.touches ? e.touches.length : 0;
+    if (fingersDown === 0 && e.type !== "touchstart") touch.releaseAll();
+  };
+  for (const type of ["touchstart", "touchend", "touchcancel"]) addEventListener(type, reconcileTouches, { passive: true });
   addEventListener("blur", letGo);
   document.addEventListener("visibilitychange", () => { if (document.hidden) letGo(); });
 
@@ -288,6 +308,7 @@
     const pickerOpen = !!BBSkills.picker;
     if (menu.screen !== lastScreen || (pickerOpen && !wasPickerOpen)) letGo();
     lastScreen = menu.screen; wasPickerOpen = pickerOpen;
+    touch.tick(now, fingersDown);
     syncLayout();
     hd.frame(rawDt); // resize / zoom / slow-frame step-down redo the backing store; also resets the scale
     const input = readInput();
@@ -303,6 +324,7 @@
     if (!game.paused) stats.observe(game);
     if (game.score > best) best = store.saveBest(game.score);
     if (game.status === "over" && menu.screen === "playing") { // the run just ended: results replace game over
+      reportRun("over");
       results = BBWorlds.withMax(stats.result(game), game); // adds the maximum score, the percentage and the 70 % star rule
       if (BBScores.plausible(game.score, game.wave, runSeconds) && BBScores.qualifies(scores, game.score)) {
         picker = BBInput.createInitialsPicker();
@@ -312,7 +334,7 @@
     const onScores = menu.screen === "scores";
     if (onScores && !wasOnScores) refreshGlobal(); // opening the table asks the server again
     wasOnScores = onScores;
-    renderer.draw({ game, menu, best, touch, touchSeen, padConnected: gamepad.connected(), firing: keyboard.fire() || gamepad.fire(), time: now / 1000, muted: audio.muted(), scores, results, highlight, picker, tab: scoresTab, net: netView });
+    renderer.draw({ game, menu, best, touch, touchSeen, padConnected: gamepad.connected(), firing: keyboard.fire() || gamepad.fire(), time: now / 1000, muted: audio.muted(), scores, results, highlight, picker, tab: scoresTab, net: netView, played });
     requestAnimationFrame(frame);
   }
   function start() {

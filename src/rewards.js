@@ -4,6 +4,15 @@
 (function (root) {
   const WEAPON = { maxLevel: 5, spread: 14 }; // spread: horizontal px between shots
   const CAPSULE = { w: 28, h: 16, speed: 90, everyKills: 12, dropChance: 0.3 };
+  // drops are rare so a strong ship cannot max out: x0.3, halved again once a family is MASTERED,
+  // and a quarter of that once a family is ULTRA-MAD
+  const DROP_FACTOR = { normal: 0.3, mastered: 0.3 * 0.5, ultra: 0.3 * 0.5 * 0.25 };
+  function dropChance(game) {
+    const S = root.BBSkills;
+    const top = Math.max(0, ...Object.values(game.skills || {}).filter((v) => typeof v === "number"));
+    const f = top >= S.ULTRA ? DROP_FACTOR.ultra : top >= S.MASTERED ? DROP_FACTOR.mastered : DROP_FACTOR.normal;
+    return CAPSULE.dropChance * f;
+  }
   const RANKS = ["bronze", "silver", "gold", "rainbow", "heart"];
   // chance of each rank when a capsule is rolled (sums to 1)
   const RANK_ODDS = { bronze: 0.52, silver: 0.23, gold: 0.14, rainbow: 0.03, heart: 0.08 };
@@ -52,14 +61,14 @@
     return c;
   }
 
-  // Every 12th kill drops a rolled capsule where the drone died, after a 30 % roll.
+  // Every 12th kill drops a rolled capsule where the drone died, after a dropChance roll (9 % at first).
   function onKill(game, x, y) {
-    if (game.kills % CAPSULE.everyKills === 0 && game.rng() < CAPSULE.dropChance) spawnCapsule(game, x, y);
+    if (game.kills % CAPSULE.everyKills === 0 && game.rng() < dropChance(game)) spawnCapsule(game, x, y);
   }
 
-  // Every mini-boss drops a capsule after the same 30 % roll.
+  // Every mini-boss drops a capsule after the same roll.
   function onMiniBossKill(game, x, y) {
-    if (!(game.rng() < CAPSULE.dropChance)) return null;
+    if (!(game.rng() < dropChance(game))) return null;
     return spawnCapsule(game, x, y);
   }
 
@@ -120,6 +129,7 @@
 
   function updateTimers(game, dt) {
     game.superStar = Math.max(0, game.superStar - dt);
+    game.shieldFlash = Math.max(0, (game.shieldFlash || 0) - dt);
     placeEscorts(game);
   }
 
@@ -131,7 +141,7 @@
   // A hit on the ship: Super Star ignores it, the shield soaks it, otherwise it goes through.
   function absorbHit(game) {
     if (game.superStar > 0) return true;
-    if (game.shield > 0) { game.shield -= 1; return true; }
+    if (game.shield > 0) { game.shield -= 1; game.shieldFlash = 0.5; return true; } // the silver shield icon lights up
     return false;
   }
 
@@ -146,7 +156,7 @@
 
   root.BBRewards = {
     WEAPON, TWIN, MAGNETO, CAPSULE, RANKS, RANK_ODDS, REWARD, SHIELD, ESCORT, SUPER_STAR,
-    initRewards, rollRank, spawnCapsule, onKill, onMiniBossKill, weaponShots, fireRateMult,
+    DROP_FACTOR, dropChance, initRewards, rollRank, spawnCapsule, onKill, onMiniBossKill, weaponShots, fireRateMult,
     addEscort, placeEscorts, applyCapsule, updateCapsules, updateTimers, onLifeLost, absorbHit, hitEscort,
   };
 })(globalThis);

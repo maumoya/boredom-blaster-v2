@@ -1,16 +1,17 @@
 // Boredom Blaster input logic: floating joystick, touch buttons, keyboard. Plain script like game.js;
 // the tests load it in Node and read globalThis.BBInput. No DOM access here.
 (function (root) {
-  const W = 480, H = 640;
+  const W = 480, H = root.BB_FIELD_H || 640; // index.html sets the full-screen height; 640 in tests
   const STICK = { max: 60, dead: 8 }; // px, in canvas coordinates
+  const DY = H - 640; // on a tall screen the floating buttons keep their distance from the bottom edge
   const BUTTONS = {
-    fire: { x: 418, y: 574, r: 38 },
-    special: { x: 338, y: 580, r: 30 },
-    kaboom: { x: 280, y: 580, r: 26 },
+    fire: { x: 418, y: 574 + DY, r: 38 },
+    special: { x: 338, y: 580 + DY, r: 30 },
+    kaboom: { x: 280, y: 580 + DY, r: 26 },
   };
   // LASER and TWIN: shown (and tappable) only while owned. They sit beside the classic buttons so that
   // BUTTONS / layoutFor stay as they were. Both inputs queue presses for game.update (see takeActions).
-  const EXTRA_BUTTONS = { laser: { x: 418, y: 506, r: 26 }, twin: { x: 350, y: 516, r: 22 } };
+  const EXTRA_BUTTONS = { laser: { x: 418, y: 506 + DY, r: 26 }, twin: { x: 350, y: 516 + DY, r: 22 } };
   const EXTRA_BELOW = { laser: { x: 410, y: -62, r: 22 }, twin: { x: 264, y: -36, r: 20 } }; // y: from the zone centre
   const EXTRA_KEYS = { KeyK: "laser", KeyL: "twin" }; // used while keys.js has no binding for them
   const actionQueue = { laser: false, twin: false };
@@ -38,10 +39,9 @@
   const ZONE_MIN = 130, ZONE_MAX = 260; // canvas px the zone may take
   const DPAD_DEAD = 0.28; // fraction of the D-pad radius that counts as the centre
 
-  // "below" when the screen is at least 140 px taller than 3:4 (and the Settings switch allows it), else "overlay"
-  function controlsZone(screenW, screenH, enabled) {
-    if (enabled === false || !(screenW > 0) || !(screenH > 0)) return "overlay";
-    return screenH - (screenW * 4) / 3 >= ZONE_MIN_EXTRA ? "below" : "overlay";
+  // the controls always float over the full-screen playfield; the old "below" zone is retired
+  function controlsZone() {
+    return "overlay";
   }
   // canvas px of the zone for a screen: fills the extra height, within limits
   function zoneHeightFor(screenW, screenH) {
@@ -65,7 +65,7 @@
       ? { fire: { x: 410, y: cy + 6, r: 42 }, special: { x: 326, y: cy - 14, r: 34 }, kaboom: { x: 264, y: cy + 20, r: 30 } }
       : BUTTONS;
     for (const name of Object.keys(base)) buttons[name] = flip(base[name]);
-    const dpad = !opts.dpad ? null : flip(below ? { x: 100, y: cy, r: Math.min(64, Math.floor(half / HIT_SCALE)) } : { x: 92, y: 530, r: 56 });
+    const dpad = !opts.dpad ? null : flip(below ? { x: 100, y: cy, r: Math.min(64, Math.floor(half / HIT_SCALE)) } : { x: 92, y: 530 + DY, r: 56 });
     return { zone: below ? "below" : "overlay", zoneH, leftHanded: !!opts.leftHanded, buttons, dpad };
   }
 
@@ -136,8 +136,16 @@
   }
 
   // Touch: left half steers, right half presses buttons. Pointers are tracked by id so thumbs stay separate.
+  const STICK_IDLE_MS = 1500; // a stick pointer silent this long with no live touch under its id lets go
+  const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  // held pointer ids that are no longer among the screen's active touches: their pointerup never came
+  function reconcile(heldIds, activeIds) {
+    const active = new Set(activeIds || []);
+    return [...(heldIds || [])].filter((id) => !active.has(id));
+  }
   function createTouch(leftHanded) {
     let swapped = !!leftHanded;
+    let stickAt = 0; // ms of the stick pointer's last down or move
     const stick = createJoystick();
     const held = new Map(); // pointer id -> button name
     const pressed = { special: false, kaboom: false };
@@ -147,6 +155,7 @@
 
     const reset = () => {
       held.clear();
+      stickAt = 0;
       pad = { id: null, x: 0, y: 0 };
       if (stick.state.active) stick.end(stick.state.id);
     };
@@ -166,12 +175,12 @@
         for (const name of Object.keys(all)) if (owned[name]) out[name] = all[name];
         return out;
       },
-      start(id, x, y) {
+      start(id, x, y, t) {
         const S = root.BBSkills;
         if (S && S.picker && S.pickerTap(S.game, x, y)) return; // a tap while the picker is open only picks
         const d = layout && layout.dpad && dpadVector(layout.dpad, x, y);
         if (d && pad.id === null) { pad = { id, x: d.x, y: d.y }; return; }
-        if ((x < W / 2) !== swapped) { if (!(layout && layout.dpad)) stick.start(id, x, y); return; } // with a D-pad there is no floating stick
+        if ((x < W / 2) !== swapped) { if (!(layout && layout.dpad) && stick.start(id, x, y)) stickAt = t === undefined ? nowMs() : t; return; } // with a D-pad there is no floating stick
         const extra = buttonAt(x, y, this.extraButtons());
         if (extra) { actionQueue[extra] = true; return; }
         const name = buttonAt(x, y, buttons());
@@ -179,13 +188,27 @@
         held.set(id, name);
         if (name === "special" || name === "kaboom") pressed[name] = true;
       },
-      move(id, x, y) {
+      move(id, x, y, t) {
+        if (stick.state.active && stick.state.id === id) stickAt = t === undefined ? nowMs() : t;
         if (pad.id === id) {
           const d = dpadVector(layout.dpad, x, y);
           pad = { id, x: d ? d.x : 0, y: d ? d.y : 0 }; // sliding off the pad stops; the finger keeps the pad
           return;
         }
         stick.move(id, x, y);
+      },
+      // ids of every pointer held now: stick, D-pad finger and buttons
+      heldIds() {
+        const ids = new Set(held.keys());
+        if (stick.state.active) ids.add(stick.state.id);
+        if (pad.id !== null) ids.add(pad.id);
+        return [...ids];
+      },
+      // called each frame: a stick silent for STICK_IDLE_MS while no finger is on the screen re-centres itself.
+      // Pointer ids and Touch.identifier are numbered differently by browsers, so only the finger count is trusted.
+      tick(t, fingersDown) {
+        const s = stick.state;
+        if (s.active && !fingersDown && t - stickAt >= STICK_IDLE_MS) stick.end(s.id);
       },
       end(id) {
         if (pad.id === id) pad = { id: null, x: 0, y: 0 };
@@ -373,8 +396,9 @@
   const TITLE_LAYOUT = { x: 140, y: 330, w: 200, h: 42, gap: 14 };
   const SETTINGS_LAYOUT = { x: 60, y: 108, w: 360, h: 26, gap: 2 };
   const SETTINGS_TOP_LAYOUT = { x: 60, y: 150, w: 360, h: 58, gap: 16 }; // the five big rows
+  const MENU_DY = Math.round((H - 640) / 2); // menus keep their 640-tall layout, centred on a tall screen
   const GEAR = { x: 436, y: 100, r: 18 }; // the settings gear on the title and pause screens
-  const MENU_ACTIONS =["resume", "howto", "swap", "restart"];
+  const MENU_ACTIONS = ["resume", "howto", "swap", "restart", "recentre"];
   const TITLE_ACTIONS = ["start", "scores", "howto"];
   const TITLE_ITEMS = ["START", "HIGH SCORES", "HOW TO PLAY"];
   function createMenu(opts) {
@@ -442,7 +466,7 @@
       m.capturing = null;
       return "bound";
     };
-    m.items = () => ["Resume", "How to play", "Left-hand: " + (m.leftHanded ? "ON" : "OFF"), "Restart"];
+    m.items = () => ["Resume", "How to play", "Left-hand: " + (m.leftHanded ? "ON" : "OFF"), "Restart", "Re-centre controls"];
     m.titleItems = () => TITLE_ITEMS.slice();
     const listFor = () => (m.screen === "title" ? TITLE_ACTIONS : m.screen === "pause" ? MENU_ACTIONS : m.screen === "settings" ? m.settingsRows() : null);
     const leaveHowTo = () => { m.screen = m.after; m.after = "playing"; m.cursor = 0; m.capturing = null; m.padCapturing = null; m.section = null; m.resetArmed = false; };
@@ -527,6 +551,7 @@
       m.cursor = i;
       if (action === "howto") { m.after = "pause"; m.screen = "howto"; }
       else if (action === "swap") m.leftHanded = !m.leftHanded;
+      else if (action === "recentre") m.screen = "pause"; // stays paused; main.js lets go of every input
       else m.screen = "playing"; // resume or restart
       return action;
     };
@@ -667,9 +692,9 @@
 
   root.BBInput = {
     createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
-    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, SETTINGS_TOP_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
+    STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, SETTINGS_TOP_LAYOUT, GEAR, MENU_DY, TITLE_ACTIONS, MAX_SCORES,
     toGamePoint, EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
-    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, STRIP_H, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll,
+    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, STRIP_H, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll, reconcile, STICK_IDLE_MS,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
   };

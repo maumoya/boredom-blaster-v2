@@ -5,29 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Boredom Blaster v2 (test)</title>
+<meta name="apple-mobile-web-app-title" content="Boredom Blaster">
+<link rel="icon" href="assets/brand/icon-180.png">
+<link rel="apple-touch-icon" href="assets/brand/icon-180.png">
+<title>Boredom Blaster</title>
 <meta name="robots" content="noindex">
 <meta name="description" content="Free space shooter. Tap and play: bosses, power-ups and global high scores.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://maumoya.github.io/boredom-blaster-v2/">
 <meta property="og:title" content="Boredom Blaster">
 <meta property="og:description" content="Free space shooter. Tap and play: bosses, power-ups and global high scores.">
-<meta property="og:image" content="https://maumoya.github.io/boredom-blaster-v2/preview.png?v=599c652">
+<meta property="og:image" content="https://maumoya.github.io/boredom-blaster-v2/assets/brand/preview.jpg?v=701e30b">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="apple-touch-icon" href="preview.png">
 <style>
   html, body { margin: 0; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; }
   body { box-sizing: border-box; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
-  canvas { height: 100vh; height: 100dvh; max-height: 100%; max-width: 100vw; aspect-ratio: 3 / 4; background: #050514; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { height: 100vh; height: 100dvh; max-height: 100%; max-width: 100vw;  background: #050514; touch-action: none; user-select: none; -webkit-user-select: none; }
 </style>
 </head>
 <body>
 <canvas id="screen"></canvas>
 <script>
+// playfield height in game units so the canvas fills the whole screen at 480 wide (390x844 -> 1038);
+// a 3:4 or wider window keeps 640. Read once at load, before the game scripts.
 (function () {
-  var fallback = ["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/assets.js","src/ui.js","src/worlds.js","src/render.js","src/main.js"];
+  var b = getComputedStyle(document.body), w = innerWidth;
+  var h = innerHeight - parseFloat(b.paddingTop) - parseFloat(b.paddingBottom);
+  window.BB_FIELD_H = w > 0 && h > 0 ? Math.max(640, Math.min(1100, Math.round((480 * h) / w))) : 640;
+})();
+</script>
+<script>
+(function () {
+  var fallback = ["src/rewards.js","src/enemies.js","src/skills.js","src/game.js","src/keys.js","src/audio.js","src/input.js","src/scores.js","src/scoresNet.js","src/playStats.js","src/assets.js","src/ui.js","src/worlds.js","src/render.js","src/main.js"];
   function load(list, v, i) {
     if (i >= list.length) return;
     var s = document.createElement("script");

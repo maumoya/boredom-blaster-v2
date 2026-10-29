@@ -79,7 +79,7 @@
 
   // ---- touch layout switches (bb.controls): kept apart from the sound switches ----
   const CONTROLS_KEY = "bb.controls";
-  const CONTROL_SWITCHES = ["below", "dpad"];
+  const CONTROL_SWITCHES = ["dpad"]; // "below" is retired: the controls always float over the full screen
   const CONTROL_LABELS = { below: "Controls below", dpad: "D-pad" };
   const CONTROL_DEFAULTS = { below: true, dpad: false };
 

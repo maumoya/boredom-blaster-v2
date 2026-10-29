@@ -1,7 +1,7 @@
 // Boredom Blaster game logic. Plain script (no import/export) so index.html works from file://;
 // the tests load it in Node and read globalThis.BB.
 (function (root) {
-  const W = 480, H = 640;
+  const W = 480, H = root.BB_FIELD_H || 640; // index.html sets the full-screen height; 640 in tests
   const TRAY_H = 0; // no tray: the controls float over the playfield
   const PLAY_H = H;
   const HUD_H = 64; // top bar
@@ -10,7 +10,7 @@
   const DRONE = { w: 28, h: 20, gapX: 44, gapY: 36, points: 10 };
   const SHIP_MIN_Y = HUD_H; // the ship goes anywhere below the top bar
   const SPECIAL = { w: 40, h: 16, speed: 420, cooldown: 6 };
-  const KABOOM = { killsPerCharge: 10, maxCharges: 3, flight: 0.5, radius: 220, blast: 0.6 }; // missile flight, blast radius (px) and blast growth, in seconds
+  const KABOOM = { killsPerCharge: 18, maxCharges: 3, flight: 0.5, radius: 220, blast: 0.6 }; // missile flight, blast radius (px) and blast growth, in seconds
   const START_LIVES = 3;
   const MAX_LIVES = 9;
   const INVULN = 1.5;
@@ -22,7 +22,7 @@
   const R = () => root.BBRewards; // src/rewards.js, loaded before the game is created
   const E = () => root.BBEnemies; // src/enemies.js, loaded before the game is created
   const K = () => root.BBSkills; // src/skills.js, loaded right behind this file
-  const LASER = { duration: 1.5, cooldown: 6, tick: 0.1, damage: 1, bossDamage: 2, w: 10, gap: 36 };
+  const LASER = { duration: 1.5, cooldown: 9, tick: 0.1, damage: 1, bossDamage: 2, w: 10, gap: 36 };
   const MOON = { r: 8, orbit: 46, speed: 2.4, bossDamage: 5, bossGap: 0.5 };
   const BEND = { radius: 30, accel: 900 }; // ULTRA-MAD Magneto bends enemy bullets near the ship
 
@@ -144,7 +144,7 @@
       bullets: [], drones: [], enemyBullets: [],
       score: 0, maxScore: 0, lives: START_LIVES, wave: opts && opts.wave > 1 ? Math.floor(opts.wave) : 1, // opts.wave: the ?wave=N debug start
       cooldown: 0, invuln: 0, dir: 1,
-      specialCooldown: 0, laserCooldown: 0, laserBeam: null, moonAngle: 0, moons: [], twinFlash: null, kills: 0, kaboomCharges: 0, missiles: [], nuke: null, nukes: 0, paused: false,
+      specialCooldown: 0, laserCooldown: 0, laserBeam: null, moonAngle: 0, moons: [], twinFlash: null, kills: 0, kaboomCharges: 0, missiles: [], nuke: null, nukes: 0, paused: false, debris: [], debrisClock: 0,
       status: "playing", // "playing" | "over"
     };
     if (opts && opts.rng) game.rng = opts.rng;
@@ -225,6 +225,7 @@
     if (byKaboom) award(game, e);
     else addKill(game, e);
     if (e.boss) R().onMiniBossKill(game, e.x + e.w / 2, e.y + e.h);
+    if (e.worldBoss) game.lastBoss = { x: e.x + e.w / 2, y: e.y + e.h / 2 }; // where the WORLD CLEAR stamp lands
     if (!byKaboom) game.drones.push(...register(game, E().splitChildren(game, e)));
   }
 
@@ -328,6 +329,7 @@
     if (game.status !== "playing" || game.paused) return;
     input = input || {};
     dt *= K().timeScale(game); // the skill picker slows the game to 15 %
+    if (game.warp) { stepWarp(game, dt); return; }
     if (game.pops) game.pops = game.pops.map((p) => ({ ...p, y: p.y - 30 * dt, life: p.life - dt })).filter((p) => p.life > 0);
     const move = moveVector(input);
     game.ship.x = Math.max(0, Math.min(W - game.ship.w, game.ship.x + move.x * SHIP.speed * dt));
@@ -357,7 +359,7 @@
     // formation drones sweep sideways, drop half a row at each edge; faster with the wave, the cycle
     // and as the swarm thins. The other species move on their own patterns (enemies.js).
     const formation = game.drones.filter(isFormation);
-    const speed = (50 + game.wave * 12 + (40 - Math.min(formation.length, 40)) * 2) * E().speedMult(game.wave);
+    const speed = (50 + E().waveInWorld(game.wave) * 12 + (40 - Math.min(formation.length, 40)) * 2) * E().speedMult(game.wave);
     // the formation moves as one rigid block: the shift is cut at the wall so spacing never changes
     if (formation.length) {
       let dx = game.dir * speed * dt;
@@ -398,6 +400,7 @@
     stepMoons(game, dt);
     stepMissiles(game, dt);
     game.drones = game.drones.filter((d) => !d.dead);
+    stepDebris(game, dt);
 
     // the twin takes the first hit (a shot or a touch) and leaves
     if (game.twin) {
@@ -433,15 +436,93 @@
       game.wave += 1;
       game.bullets = [];
       game.enemyBullets = [];
+      if (E().worldIndex(game.wave) > E().worldIndex(game.wave - 1)) { // wave 100 of a world was just cleared
+        newWorld(game);
+        startWarp(game); // the next wave spawns when the cinematic ends
+      } else spawnWave(game);
+    }
+  }
+
+  // A new world: tools, skills and charges start over; the score and lives carry on.
+  function newWorld(game) {
+    const keep = { score: game.score, lives: game.lives, rng: game.rng };
+    R().initRewards(game);
+    Object.assign(game, keep, {
+      kaboomCharges: 0, nukes: 0, nuke: null, missiles: [], moons: [], laserBeam: null, laserCooldown: 0,
+      specialCooldown: 0, twinFlash: null, debris: [], debrisClock: 0, worldsCleared: (game.worldsCleared || 0) + 1,
+    });
+  }
+
+  // ---- warp between worlds: WORLD CLEAR stamp, the ship flies out, the route map, the new world fades in ----
+  const WARP = { stamp: 1.4, fly: 1.2, map: 2.6, fade: 0.8 };
+  WARP.total = WARP.stamp + WARP.fly + WARP.map + WARP.fade;
+  function startWarp(game) {
+    const at = game.lastBoss || { x: W / 2, y: 140 };
+    game.warp = { t: 0, from: E().worldIndex(game.wave) - 1, to: E().worldIndex(game.wave), x: at.x, y: at.y, shipY: game.ship.y };
+    game.lastBoss = null;
+    game.debris = [];
+  }
+  // the phase name and its 0..1 progress at warp time t
+  function warpPhase(t) {
+    let start = 0;
+    for (const name of ["stamp", "fly", "map", "fade"]) {
+      if (t < start + WARP[name]) return { name, k: (t - start) / WARP[name] };
+      start += WARP[name];
+    }
+    return { name: "done", k: 1 };
+  }
+  function stepWarp(game, dt) {
+    const w = game.warp;
+    w.t += dt;
+    const p = warpPhase(w.t);
+    if (p.name === "fly") game.ship.y = w.shipY - p.k * p.k * (w.shipY + game.ship.h + 20); // accelerates off the top
+    if (p.name === "map" || p.name === "fade") game.ship.y = SHIP.y + (1 - (p.name === "fade" ? p.k : 0)) * 200; // waits below, then glides home
+    if (p.name === "done") {
+      game.warp = null;
+      game.ship.x = (W - SHIP.w) / 2;
+      game.ship.y = SHIP.y;
+      game.invuln = Math.max(game.invuln, 1.5);
       spawnWave(game);
     }
+  }
+
+  // ---- debris: from world 2 on, rocks fall through the field; shots break them, touching one hurts ----
+  const DEBRIS = { perSecond: 0.35, maxPerSecond: 1.6, minR: 9, maxR: 17, minSpeed: 70, maxSpeed: 150, points: 5 };
+  const debrisRate = (wave) => Math.min(DEBRIS.maxPerSecond, DEBRIS.perSecond * E().worldIndex(wave));
+  function stepDebris(game, dt) {
+    if (!game.debris) game.debris = [];
+    const rate = debrisRate(game.wave), rng = game.rng || Math.random;
+    if (rate > 0) {
+      game.debrisClock = (game.debrisClock || 0) + dt * rate;
+      while (game.debrisClock >= 1) {
+        game.debrisClock -= 1;
+        const r = DEBRIS.minR + rng() * (DEBRIS.maxR - DEBRIS.minR), hp = 1 + Math.floor(E().worldIndex(game.wave) / 2);
+        game.debris.push({ x: rng() * (W - 2 * r), y: HUD_H - 2 * r, w: 2 * r, h: 2 * r, hp, spin: rng() * 6.28,
+          vx: (rng() - 0.5) * 40, vy: DEBRIS.minSpeed + rng() * (DEBRIS.maxSpeed - DEBRIS.minSpeed) });
+      }
+    }
+    for (const d of game.debris) {
+      d.x += d.vx * dt; d.y += d.vy * dt; d.spin += dt * 1.5;
+      const b = game.bullets.find((x) => !x.dead && hit(x, d));
+      if (b) {
+        if (!b.pierce) b.dead = true;
+        d.hp -= b.pierce ? PIERCE_DAMAGE : 1;
+        if (d.hp <= 0) { d.dead = true; game.score += DEBRIS.points; game.maxScore += DEBRIS.points; continue; }
+      }
+      if (game.invuln <= 0 && game.status === "playing" && hit(d, game.ship)) {
+        d.dead = true;
+        if (!R().absorbHit(game)) loseLife(game);
+      }
+    }
+    game.bullets = game.bullets.filter((b) => !b.dead);
+    game.debris = game.debris.filter((d) => !d.dead && d.y < PLAY_H && d.x + d.w > 0 && d.x < W);
   }
 
   function restart(opts) {
     return createGame(opts);
   }
 
-  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, centerOf, densestPoint, special, laser, twin, twinRect, laserColumns, moonPos, LASER, MOON, BEND, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit };
+  root.BB = { R, E, PIERCE_DAMAGE, K, W, H, PLAY_H, TRAY_H, HUD_H, SHIP, SHIP_MIN_Y, SPECIAL, KABOOM, centerOf, densestPoint, special, laser, twin, twinRect, laserColumns, moonPos, LASER, MOON, BEND, kaboom, togglePause, addLife, BULLET, DRONE, START_LIVES, MAX_LIVES, createGame, shoot, update, restart, hit, newWorld, stepDebris, DEBRIS, debrisRate, WARP, warpPhase, startWarp, stepWarp };
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.
