@@ -38,17 +38,26 @@
 
     return {
       enabled,
+      // a run ticket from the server, or null (offline, refused, slow); without one nothing is sent for the run
+      async start() {
+        if (!enabled) return null;
+        try {
+          const r = await call("/start", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "" });
+          return r && typeof r.ticket === "string" ? r.ticket : null;
+        } catch (e) { return null; }
+      },
       async fetchTop() {
         if (!enabled) return { ok: false, offline: true, list: [] };
         try { return { ok: true, list: cleanList(await call("/top")) }; } catch (e) { return { ok: false, list: [] }; }
       },
-      // entry: { initials, score, wave, seconds }; seconds is only used by the server's plausibility check
+      // entry: { initials, score, wave, seconds, ticket }; seconds and the ticket are only used by the server's checks
       async submit(entry) {
         if (!enabled) return { ok: false, offline: true };
+        if (!entry.ticket) return { ok: false, noTicket: true };
         if (!root.BBScores.plausible(entry.score, entry.wave, entry.seconds)) return { ok: false, implausible: true };
         const body = JSON.stringify({
           initials: root.BBScores.cleanInitials(entry.initials), score: Math.floor(entry.score),
-          wave: Math.floor(entry.wave), seconds: Math.floor(entry.seconds),
+          wave: Math.floor(entry.wave), seconds: Math.floor(entry.seconds), ticket: String(entry.ticket),
         });
         try {
           await call("/submit", { method: "POST", headers: { "Content-Type": "text/plain" }, body });

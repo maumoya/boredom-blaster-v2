@@ -70,10 +70,11 @@
     const enabled = !!api && !!doFetch && !optedOut(opts.nav);
     return {
       enabled,
-      async send(event) {
-        if (!enabled || !event || event.seconds < MIN_SECONDS) return false;
+      // ticket: this run's ticket from the scores Worker; a run without one sends nothing
+      async send(event, ticket) {
+        if (!enabled || !event || event.seconds < MIN_SECONDS || !ticket) return false;
         try {
-          await doFetch(api + "/event", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(event), keepalive: true });
+          await doFetch(api + "/event", { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ ...event, ticket }), keepalive: true });
           return true;
         } catch (e) { return false; }
       },

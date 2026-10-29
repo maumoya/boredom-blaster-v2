@@ -85,6 +85,9 @@
   let highlight = null; // { index, until }: the new row blinks until this time (seconds)
   let picker = null; // the initials picker while a new record is being entered
   let runSeconds = 0; // play time of this run, for the score plausibility check
+  // the server's ticket for this run; a practice run (?wave start, console used) never gets one, so it
+  // never reaches the global table or the play stats
+  let ticket = null, practice = false, consoleUsed = false;
   const playLog = BBPlayStats.createClient(); // one anonymous line per run; off under Do Not Track
   const playLocal = BBPlayStats.createLocal(storage);
   let played = playLocal.load(); // { runs, seconds } on this device, for the title screen
@@ -92,7 +95,7 @@
     if (!game || runSeconds < BBPlayStats.MIN_SECONDS) return;
     played = playLocal.add(runSeconds);
     const device = BBPlayStats.deviceOf(innerWidth, innerHeight, navigator.maxTouchPoints > 0);
-    playLog.send(BBPlayStats.runEvent(game, runSeconds, end, device));
+    if (!practice) playLog.send(BBPlayStats.runEvent(game, runSeconds, end, device), ticket);
   }
   let stats = BBInput.createRunStats(); // goals and boss-wave lives for the results screen
   let results = null;
@@ -131,6 +134,10 @@
   function restart() {
     if (game && game.status !== "over") reportRun("quit");
     game = BB.restart(startOpts());
+    practice = game.wave > 1 || consoleUsed;
+    ticket = null;
+    const mine = game;
+    if (!practice) net.start().then((t) => { if (game === mine) ticket = t; });
     stats = BBInput.createRunStats();
     results = null;
     picker = null;
@@ -151,7 +158,7 @@
   function confirmInitials() {
     const r = scoreStore.add({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, date: Date.now() });
     scores = r.list;
-    if (net.enabled) net.submit({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, seconds: Math.round(runSeconds) });
+    if (net.enabled && !practice) net.submit({ initials: BBScores.cleanInitials(picker.value()), score: game.score, wave: game.wave, seconds: Math.round(runSeconds), ticket });
     highlight = r.index >= 0 ? { index: r.index, until: performance.now() / 1000 + HIGHLIGHT_SECONDS } : null;
     picker = null;
     menu.finish();
@@ -351,5 +358,6 @@
     s.onerror = () => console.error("Boredom Blaster: src/rewards.js failed to load");
     document.head.appendChild(s);
   }
-  globalThis.__game = () => game; // handy for debugging in the console
+  // handy for debugging in the console; touching it makes this run and every later one practice-only
+  globalThis.__game = () => { consoleUsed = practice = true; ticket = null; return game; };
 })();
