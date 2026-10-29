@@ -2,6 +2,7 @@
 // parallax stars and meteors, shield ring, hit flash, boss HP bar, framed HUD and the menu screens.
 // Plain script; main.js calls BBRender.createRenderer(ctx, assets). Tests drive it with a stub canvas.
 (function (root) {
+  const UI = root.BBUI, N = UI.NEON; // shared neon palette and type
   const W = 480, H = 640;
   const HUD_H = 64; // two-row top bar
   const CONTROLS_ALPHA = 0.7; // the floating buttons are see-through
@@ -91,7 +92,7 @@
     }
     function text(str, x, y, size, color, align) {
       ctx.fillStyle = color;
-      ctx.font = "bold " + size + "px monospace";
+      ctx.font = UI.font(size);
       ctx.textAlign = align || "left";
       ctx.fillText(str, x, y);
     }
@@ -103,7 +104,7 @@
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
     }
     const rainbow = (t) => "hsl(" + (Math.floor(t * 250) % 360) + ",90%,60%)";
-    const rankColor = (rank, t) => (rank === "rainbow" ? rainbow(t) : rank === "heart" ? "#f45" : RANK_COLOR[rank] || "#fff");
+    const rankColor = (rank, t) => (rank === "rainbow" ? rainbow(t) : rank === "heart" ? N.red : RANK_COLOR[rank] || "#fff");
     const center = (e) => [e.x + e.w / 2, e.y + e.h / 2];
 
     // ---- effects state ----
@@ -115,7 +116,7 @@
         const life = 0.5 + ((i * 13) % 5) * 0.08;
         particles.push({
           x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life,
-          color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? "#fd4" : "#f74", size: (big ? 6 : 4) + (i % 3),
+          color: i % 3 === 0 ? "#fff" : i % 3 === 1 ? N.yellow : "#f74", size: (big ? 6 : 4) + (i % 3),
         });
       }
     }
@@ -234,7 +235,7 @@
       ctx.shadowColor = rankColor(c.rank, t);
       ctx.shadowBlur = 10;
       if (c.rank === "heart") { // no sprite for the heart capsule: a red heart badge
-        ui.icon("heart", cx, cy, c.h * 1.5, "#f45");
+        ui.icon("heart", cx, cy, c.h * 1.5, N.red);
         ctx.restore();
         return;
       }
@@ -253,7 +254,7 @@
       drawEngineFlame(cx, s.y + s.h - 2, t);
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
       const shipFallback = () => {
-        ctx.fillStyle = "#4df";
+        ctx.fillStyle = N.cyan;
         ctx.beginPath();
         ctx.moveTo(cx, s.y); ctx.lineTo(s.x + s.w, s.y + s.h); ctx.lineTo(cx, s.y + s.h - 6); ctx.lineTo(s.x, s.y + s.h);
         ctx.closePath(); ctx.fill();
@@ -306,17 +307,17 @@
     function drawHud(view) {
       const { game } = view, t = view.time || 0;
       const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
-      ui.panel(0, 0, W, HUD_H, { radius: 0, stroke: "#2a4a7a" });
+      ui.panel(0, 0, W, HUD_H, { radius: 0, stroke: N.violet });
       // row 1: lives, wave, best, pause
-      ui.icon("heart", 18, 15, 20, "#f45");
+      ui.icon("heart", 18, 15, 20, N.red);
       text("×" + Math.max(0, game.lives), 32, 21, 16, "#fff");
       text("WAVE " + game.wave, 130, 21, 15, "#fff", "center");
-      text("BEST " + (view.best || 0), 260, 21, 13, "#fd4", "center");
+      text("BEST " + (view.best || 0), 260, 21, 13, N.yellow, "center");
       const paused = view.menu && view.menu.screen === "pause";
       ui.button(P.x, P.y, P.w, P.h, "", paused ? "pressed" : "idle");
       ui.icon("pause", P.x + P.w / 2, P.y + P.h / 2 + (paused ? 2 : 0), 16, "#fff");
       // row 2: score counter and the weapon / shield / escort bars
-      text("SCORE", 10, 43, 9, "#9ab");
+      text("SCORE", 10, 43, 9, N.dim);
       text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
       iconBar("weapon", 150, 48, R.WEAPON.maxLevel, game.weaponLevel, RANK_COLOR.bronze);
       iconBar("shield", 236, 48, R.SHIELD.max, game.shield, RANK_COLOR.silver);
@@ -350,14 +351,14 @@
       const progress = Math.max(0, Math.min(1, 1 - game.specialCooldown / BB.SPECIAL.cooldown));
       const justFired = game.specialCooldown > BB.SPECIAL.cooldown - 0.15;
       ui.ringButton(B.special.x, B.special.y, B.special.r, "spec", {
-        state: held("special") || justFired ? "pressed" : "idle", color: "#4df", cooldown: progress, ready: glowing && progress >= 1, time: t,
+        state: held("special") || justFired ? "pressed" : "idle", color: N.cyan, cooldown: progress, ready: glowing && progress >= 1, time: t,
       });
 
       ui.ringButton(B.kaboom.x, B.kaboom.y, B.kaboom.r, "boom", {
-        state: game.kaboomCharges <= 0 ? "disabled" : held("kaboom") ? "pressed" : "idle", color: "#fd4",
+        state: game.kaboomCharges <= 0 ? "disabled" : held("kaboom") ? "pressed" : "idle", color: N.yellow,
         segments: { count: game.kaboomCharges, total: BB.KABOOM.maxCharges }, ready: glowing && game.kaboomCharges > 0, time: t,
       });
-      if (layout && layout.dpad) ui.dpad(layout.dpad.x, layout.dpad.y, layout.dpad.r, touch.axes(), "#4df");
+      if (layout && layout.dpad) ui.dpad(layout.dpad.x, layout.dpad.y, layout.dpad.r, touch.axes(), N.cyan);
       ctx.restore();
       drawStick(touch, !!(layout && layout.dpad));
     }
@@ -409,12 +410,12 @@
       dim(0.45);
       pulsed(W / 2, 150, t, () => {
         ui.title("BOREDOM", W / 2, 150, 54);
-        ui.title("BLASTER", W / 2, 215, 54, "#fd4");
+        ui.title("BLASTER", W / 2, 215, 54, N.yellow);
       });
       sprite("ship", W / 2, 268, 60, null);
       const icons = ["play", "star", "weapon"];
       menu.titleItems().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
-      text("BEST " + (view.best || 0), W / 2, 500, 16, "#fd4", "center");
+      text("BEST " + (view.best || 0), W / 2, 500, 16, N.yellow, "center");
     }
 
     // top-10 table: rank, initials, score, wave; the freshly added row blinks until view.highlight.until
@@ -423,11 +424,11 @@
       list.forEach((s, i) => {
         const y = top + i * rowH, isNew = !!hl && hl.index === i && t < hl.until;
         if (isNew && !reducedMotion && Math.floor(t * BLINK_HZ * 2) % 2) return; // blink off phase
-        const color = isNew ? "#4df" : i === 0 ? "#fd4" : "#fff";
-        text(String(i + 1) + ".", 90, y, size, "#9ab");
+        const color = isNew ? N.cyan : i === 0 ? N.yellow : "#fff";
+        text(String(i + 1) + ".", 90, y, size, N.dim);
         text(s.initials || "AAA", 140, y, size, color);
         text(String(s.score).padStart(6, "0"), 230, y, size, color);
-        text("W" + s.wave, 390, y, size - 3, "#9ab", "right");
+        text("W" + s.wave, 390, y, size - 3, N.dim, "right");
       });
     }
 
@@ -436,37 +437,37 @@
       const net = view.net || { status: "offline", list: [] };
       const global = view.tab === "global", shown = global && net.status === "ok";
       dim(0.82);
-      ui.panel(40, 90, W - 80, 440, { stroke: "#fd4" });
-      ui.title("HIGH SCORES", W / 2, 140, 28, "#fd4");
+      ui.panel(40, 90, W - 80, 440, { stroke: N.yellow });
+      ui.title("HIGH SCORES", W / 2, 140, 28, N.yellow);
       for (const name of ["global", "device"]) {
         const b = SCORE_TABS[name], on = name === (global ? "global" : "device");
-        panel(b.x, b.y, b.w, b.h, on ? "#16306a" : "#0a1030", on ? "#fd4" : "#456");
-        text(b.label, b.x + b.w / 2, b.y + 19, 14, on ? "#fd4" : "#9ab", "center");
+        panel(b.x, b.y, b.w, b.h, on ? "#16306a" : "#0a1030", on ? N.yellow : "#456");
+        text(b.label, b.x + b.w / 2, b.y + 19, 14, on ? N.yellow : N.dim, "center");
       }
       const list = shown ? net.list : view.scores || [];
       const note = !global ? "" : net.status === "loading" ? "Loading..." : net.status === "offline" ? "OFFLINE - showing this device"
         : net.status === "error" ? "Can't reach the server - showing this device" : "";
       if (note) text(note, W / 2, 245, 13, "#f90", "center");
-      else if (!list.length) text("No scores yet. Go blast something!", W / 2, 300, 15, "#9ab", "center");
+      else if (!list.length) text("No scores yet. Go blast something!", W / 2, 300, 15, N.dim, "center");
       drawTable({ ...view, scores: global && net.status === "loading" ? [] : list, highlight: shown ? null : view.highlight }, 270, 25, 19);
-      text("Left/Right or tap a tab. Enter, P or tap to go back", W / 2, 515, 12, "#fd4", "center");
+      text("Left/Right or tap a tab. Enter, P or tap to go back", W / 2, 515, 12, N.yellow, "center");
     }
 
     // new record: three letter slots with up/down boxes and an OK button
     function drawInitials(view) {
       const L = root.BBInput.INITIALS_LAYOUT, picker = view.picker;
       dim(0.82);
-      ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
-      ui.title("NEW RECORD!", W / 2, 150, 32, "#fd4");
+      ui.panel(40, 90, W - 80, 440, { stroke: N.cyan });
+      ui.title("NEW RECORD!", W / 2, 150, 32, N.yellow);
       text("SCORE " + (view.results ? view.results.score : view.game.score), W / 2, 185, 18, "#fff", "center");
       for (let i = 0; i < 3; i++) {
         const x = L.slotX[i], hot = !!picker && picker.slot === i;
-        text("▲", x, L.upY + 8, 24, hot ? "#fd4" : "#9ab", "center");
-        text(picker ? picker.value()[i] : "A", x, L.letterY, 44, hot ? "#fd4" : "#fff", "center");
-        text("▼", x, L.downY + 8, 24, hot ? "#fd4" : "#9ab", "center");
+        text("▲", x, L.upY + 8, 24, hot ? N.yellow : N.dim, "center");
+        text(picker ? picker.value()[i] : "A", x, L.letterY, 44, hot ? N.yellow : "#fff", "center");
+        text("▼", x, L.downY + 8, 24, hot ? N.yellow : N.dim, "center");
       }
       ui.button(L.ok.x, L.ok.y, L.ok.w, L.ok.h, "OK", "hot");
-      text("Arrows: letters and slots, Enter: OK", W / 2, 490, 13, "#9ab", "center");
+      text("Arrows: letters and slots, Enter: OK", W / 2, 490, 13, N.dim, "center");
     }
 
     // settings gear in the corner of the title and pause screens
@@ -485,21 +486,21 @@
         ui.button(L.x, y, L.w, L.h, "", hot ? "hot" : "idle");
         const ink = hot ? "#1a1000" : "#fff";
         text(row.label, L.x + 14, y + 19, 14, ink);
-        if (row.value) text(row.value, L.x + L.w - 14, y + 19, 14, menu.capturing && hot ? "#f55" : ink, "right");
+        if (row.value) text(row.value, L.x + L.w - 14, y + 19, 14, menu.capturing && hot ? N.red : ink, "right");
       });
-      text("Arrows and Esc always work. Esc or P: back", W / 2, 626, 12, "#fd4", "center");
+      text("Arrows and Esc always work. Esc or P: back", W / 2, 626, 12, N.yellow, "center");
     }
 
     function drawHowTo(menu) {
       dim(0.82);
-      ui.panel(40, 90, W - 80, 440, { stroke: "#4df" });
+      ui.panel(40, 90, W - 80, 440, { stroke: N.cyan });
       ui.title("HOW TO PLAY", W / 2, 140, 28);
       (menu && menu.keys ? howToRows(menu.keys) : HOW_TO_ROWS).forEach((row, i) => {
         const y = 195 + i * 40;
-        ui.icon(row.icon, 76, y - 5, 24, "#4df");
+        ui.icon(row.icon, 76, y - 5, 24, N.cyan);
         text(row.text, 98, y, 14, "#fff");
       });
-      text("Press Enter, P or tap to continue", W / 2, 500, 14, "#fd4", "center");
+      text("Press Enter, P or tap to continue", W / 2, 500, 14, N.yellow, "center");
     }
 
     // results replace the old game over: score, wave, stars and the goals checklist
@@ -507,20 +508,20 @@
       const game = view.game, t = view.time || 0;
       const res = view.results || { score: game.score, wave: game.wave, stars: 0, goals: [] };
       dim(0.7);
-      ui.panel(50, 20, W - 100, 600, { stroke: "#f55" });
-      ui.title("RESULTS", W / 2, 70, 32, "#f55");
+      ui.panel(50, 20, W - 100, 600, { stroke: N.red });
+      ui.title("RESULTS", W / 2, 70, 32, N.red);
       ui.stars(W / 2, 100, res.stars, 3, 13);
       text("SCORE " + res.score, W / 2, 145, 22, "#fff", "center");
-      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 170, 14, "#fd4", "center");
+      text("WAVE " + res.wave + "   BEST " + (view.best || 0), W / 2, 170, 14, N.yellow, "center");
       res.goals.forEach((g, i) => {
         const y = 205 + i * 24;
         ui.icon(GOAL_ICON[g.id] || "star", 100, y - 5, 18, g.done ? "#ffd23c" : "rgba(255,255,255,0.3)");
         text(g.label, 124, y, 14, g.done ? "#fff" : "#789");
-        text(g.done ? "DONE" : "-", 380, y, 13, g.done ? "#6e6" : "#789", "right");
+        text(g.done ? "DONE" : "-", 380, y, 13, g.done ? N.green : "#789", "right");
       });
-      text("TOP 10", W / 2, 305, 13, "#9ab", "center");
+      text("TOP 10", W / 2, 305, 13, N.dim, "center");
       drawTable(view, 335, 21, 16);
-      pulsed(W / 2, 580, t, () => text("Press Enter to replay", W / 2, 580, 18, "#4df", "center"));
+      pulsed(W / 2, 580, t, () => text("Press Enter to replay", W / 2, 580, 18, N.cyan, "center"));
     }
 
     // view: { game, menu, best, touch, touchSeen, time, scores, results }
@@ -535,8 +536,8 @@
       for (const d of game.drones) drawEnemy(d);
       for (const c of game.capsules) drawCapsule(c, t);
       for (const e of game.escorts) drawEscort(e);
-      for (const b of game.bullets) glowRect(b, b.pierce ? "special" : "bullet", b.pierce ? "#8ff" : "#6af");
-      for (const b of game.enemyBullets) glowRect(b, "enemyBullet", "#f55");
+      for (const b of game.bullets) glowRect(b, b.pierce ? "special" : "bullet", b.pierce ? N.magenta : N.cyan);
+      for (const b of game.enemyBullets) glowRect(b, "enemyBullet", N.red);
       drawShip(game, t);
       drawShockwaves();
       drawParticles();

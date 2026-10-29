@@ -4,11 +4,18 @@
 (function (root) {
   const TAU = Math.PI * 2;
   const ICONS = ["heart", "pause", "fire", "spec", "boom", "weapon", "shield", "escort", "star", "play", "gear"];
+  // the shared neon palette: buttons, menus, shots and the HUD all draw from it
+  const NEON = {
+    cyan: "#2ff3ff", magenta: "#ff3df0", yellow: "#fff23d", green: "#43ff8f", orange: "#ff9d2e",
+    red: "#ff4468", violet: "#a066ff", white: "#f4f8ff", dim: "#8fa4d8", ink: "#050514",
+  };
+  const FONT = '"Avenir Next", "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif';
+  const font = (size, weight) => (weight || "700") + " " + size + "px " + FONT;
   const PALETTE = {
-    idle: { top: "#5a7cc0", bottom: "#243a74", edge: "#9fc0ff", shadow: "#0a1230" },
-    hot: { top: "#ffe27a", bottom: "#d8861c", edge: "#fff2b0", shadow: "#4a2a04" },
-    pressed: { top: "#1c2d5c", bottom: "#3a5a9e", edge: "#6f8fd0", shadow: "#050a1c" },
-    disabled: { top: "#4a4f5c", bottom: "#2a2e38", edge: "#6a7080", shadow: "#0c0e14" },
+    idle: { top: "#18266a", bottom: "#0a1038", edge: NEON.cyan, shadow: "rgba(47,243,255,0.25)" },
+    hot: { top: "#ffb02e", bottom: "#ff5a1f", edge: NEON.yellow, shadow: "rgba(255,157,46,0.4)" },
+    pressed: { top: "#0a1038", bottom: "#1d2f8a", edge: NEON.magenta, shadow: "rgba(255,61,240,0.25)" },
+    disabled: { top: "#262a3a", bottom: "#161926", edge: "#5a6074", shadow: "rgba(0,0,0,0.4)" },
   };
   const PRESS_DROP = 2; // px a pressed button sinks
 
@@ -41,8 +48,11 @@
       ctx.fillStyle = vertical(y, y + h, o.top || "rgba(18,30,70,0.92)", o.bottom || "rgba(6,10,30,0.92)", o.fill || "rgba(10,18,50,0.92)");
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = o.stroke || "#3a64a8";
+      ctx.strokeStyle = o.stroke || NEON.cyan;
+      ctx.shadowColor = o.stroke || NEON.cyan;
+      ctx.shadowBlur = 14;
       ctx.stroke();
+      ctx.shadowBlur = 0;
       roundPath(x + 3, y + 3, w - 6, h - 6, Math.max(0, r - 2));
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(160,200,255,0.25)";
@@ -56,7 +66,10 @@
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = pal.edge;
+      ctx.shadowColor = pal.edge; // neon bloom on the rim
+      ctx.shadowBlur = pal === PALETTE.disabled ? 0 : 12;
       ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
     function button(x, y, w, h, label, state) {
@@ -73,9 +86,9 @@
         ctx.fill();
       }
       if (label) {
-        ctx.font = "bold 15px monospace";
+        ctx.font = font(15);
         ctx.textAlign = "center";
-        ctx.fillStyle = state === "hot" ? "#1a1000" : state === "disabled" ? "#8a90a0" : "#fff";
+        ctx.fillStyle = state === "hot" ? "#1a0a00" : state === "disabled" ? "#8a90a0" : NEON.white;
         ctx.fillText(label, x + w / 2, y + drop + h / 2 + 5);
       }
       ctx.restore();
@@ -96,7 +109,7 @@
       }
       icon_(icon, cx, cy + drop, r * 1.0, state === "disabled" ? "#7a8090" : o.color || "#fff");
       if (o.label) {
-        ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
+        ctx.font = font(10); ctx.textAlign = "center";
         ctx.fillStyle = state === "disabled" ? "#7a8090" : "#dfe8ff";
         ctx.fillText(o.label, cx, cy + drop + r * 0.78);
       }
@@ -106,7 +119,7 @@
     // glowing neon ring button, no text. opts: { state: "idle"|"pressed"|"disabled", color, time,
     //   ready (pulses), cooldown (0..1 progress arc, shown while below 1), segments: { count, total } (charge arcs) }
     function ringButton(cx, cy, r, icon, opts) {
-      const o = opts || {}, state = o.state || "idle", color = state === "disabled" ? "#5a6070" : o.color || "#4df";
+      const o = opts || {}, state = o.state || "idle", color = state === "disabled" ? "#5a6070" : o.color || NEON.cyan;
       const lit = state === "pressed", breath = o.ready && !lit ? 0.5 + 0.5 * Math.sin((o.time || 0) * 5) : 0;
       const arcAt = (rad, from, to, style, width) => {
         ctx.beginPath(); ctx.arc(cx, cy, rad, from, to);
@@ -146,7 +159,7 @@
 
     // D-pad: a plus shape with four arrow pads; `dir` is the held direction { x, y } so the pressed arms glow
     function dpad(cx, cy, r, dir, color) {
-      const d = dir || { x: 0, y: 0 }, c = color || "#4df", arm = r * 0.62, half = r * 0.3;
+      const d = dir || { x: 0, y: 0 }, c = color || NEON.cyan, arm = r * 0.62, half = r * 0.3;
       ctx.save();
       ctx.lineJoin = "round";
       ctx.beginPath();
@@ -175,16 +188,18 @@
 
     function title(str, cx, y, size, color) {
       ctx.save();
-      ctx.font = "bold " + size + "px monospace";
+      ctx.font = font(size, "800");
       ctx.textAlign = "center";
       ctx.lineJoin = "round";
       ctx.lineWidth = Math.max(3, size / 6);
-      ctx.strokeStyle = "#0a1030";
+      ctx.strokeStyle = NEON.ink;
       ctx.strokeText(str, cx, y + 3);
-      ctx.fillStyle = "#16306a";
+      ctx.fillStyle = "#0c1850";
       ctx.fillText(str, cx, y + 3);
       ctx.strokeText(str, cx, y);
-      ctx.fillStyle = vertical(y - size, y, "#ffffff", color || "#4df", color || "#4df");
+      ctx.shadowColor = color || NEON.cyan; // neon bloom behind the letters
+      ctx.shadowBlur = Math.max(10, size / 2);
+      ctx.fillStyle = vertical(y - size, y, "#ffffff", color || NEON.cyan, color || NEON.cyan);
       ctx.fillText(str, cx, y);
       ctx.restore();
     }
@@ -204,7 +219,7 @@
     function stars(cx, cy, count, total, size) {
       const gap = size * 2.4, x0 = cx - ((total - 1) * gap) / 2;
       for (let i = 0; i < total; i++) {
-        if (i < count) starShape(x0 + i * gap, cy, size, "#ffd23c", "#fff3a8");
+        if (i < count) starShape(x0 + i * gap, cy, size, NEON.yellow, "#fffbc0");
         else starShape(x0 + i * gap, cy, size, "rgba(255,255,255,0.12)", "rgba(255,255,255,0.3)");
       }
     }
@@ -273,5 +288,5 @@
     return { panel, button, iconButton, ringButton, dpad, title, stars, icon: icon_, roundPath };
   }
 
-  root.BBUI = { createUI, ICONS, PALETTE };
+  root.BBUI = { createUI, ICONS, PALETTE, NEON, FONT, font };
 })(globalThis);

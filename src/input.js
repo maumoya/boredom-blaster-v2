@@ -505,7 +505,68 @@
     };
   }
 
+  // ---- HD backing store: the canvas holds CSS size x pixel ratio; game coordinates stay W wide ----
+  const HD_MAX_RATIO = 3; // 4x phones draw at 3x
+  const HD_STEPS = [HD_MAX_RATIO, 2, 1.5]; // quality caps, tried in order when frames run slow
+  const SLOW_FRAME = 1 / 40; // seconds: slower than 40 fps counts as slow
+  const SLOW_FRAMES_TO_STEP = 45; // this many slow frames in a row drop one step
+
+  // the render scale for a pixel ratio under a quality cap (never below 1)
+  function hdScale(ratio, cap) {
+    const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    return Math.max(1, Math.min(r, HD_MAX_RATIO, cap || HD_MAX_RATIO));
+  }
+  // backing size for a canvas shown cssW x cssH; `factor` maps game units to backing pixels (backing width / W)
+  function backingSize(cssW, cssH, ratio, cap) {
+    const scale = hdScale(ratio, cap);
+    const width = Math.max(1, Math.round(cssW * scale));
+    const height = Math.max(1, Math.round(cssH * scale));
+    return { scale, width, height, factor: width / W };
+  }
+  // watches frame times; after a run of slow frames the cap steps down 3 -> 2 -> 1.5 and stays there
+  function createQuality() {
+    let step = 0, slow = 0;
+    return {
+      cap: () => HD_STEPS[step],
+      frame(dt) {
+        if (step >= HD_STEPS.length - 1) return false;
+        slow = dt > SLOW_FRAME ? slow + 1 : 0;
+        if (slow < SLOW_FRAMES_TO_STEP) return false;
+        step++; slow = 0;
+        return true; // the cap changed: redo the backing store
+      },
+    };
+  }
+
+  // keeps canvas.width/height at CSS size x ratio and the context scaled so drawing stays in game units.
+  // env: { css() -> { width, height } of the shown canvas, ratio() -> devicePixelRatio }. sync() is cheap
+  // every frame: it only resizes when the CSS size, the ratio or the quality cap changed (a resize, a zoom,
+  // moving to another screen, a slow-frame step-down). Returns true when it did.
+  function createHd(canvas, ctx, env, quality) {
+    const q = quality || createQuality();
+    let key = "", current = null;
+    function sync() {
+      const css = env.css(), size = backingSize(css.width, css.height, env.ratio(), q.cap());
+      const next = [size.width, size.height].join("x");
+      if (next === key) return false;
+      key = next; current = size;
+      canvas.width = size.width;
+      canvas.height = size.height;
+      if (typeof ctx.setTransform === "function") ctx.setTransform(size.factor, 0, 0, size.factor, 0, 0);
+      return true;
+    }
+    return {
+      sync, quality: q, size: () => current,
+      // call once per frame with the raw frame time; the context transform is also restored here
+      frame(dt) {
+        q.frame(dt);
+        if (!sync() && current && typeof ctx.setTransform === "function") ctx.setTransform(current.factor, 0, 0, current.factor, 0, 0);
+      },
+    };
+  }
+
   root.BBInput = {
+    createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
     STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
     STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,

@@ -4,8 +4,14 @@
   const BB = globalThis.BB;
   const canvas = document.getElementById("screen");
   const ctx = canvas.getContext("2d");
-  canvas.width = BB.W;
-  canvas.height = BB.H;
+  let logicalH = BB.H; // game units tall: the playfield plus the controls zone, if any
+  // sharp rendering: the backing store is the shown size x devicePixelRatio, drawing stays in 480-wide game units
+  const hd = BBInput.createHd(canvas, ctx, {
+    css: () => { const r = canvas.getBoundingClientRect(); return { width: r.width || BB.W, height: r.height || BB.H }; },
+    ratio: () => globalThis.devicePixelRatio || 1,
+  });
+  hd.sync();
+  ctx.imageSmoothingQuality = "high";
 
   let storage = null;
   try { storage = globalThis.localStorage; } catch (e) { /* blocked: best score just won't persist */ }
@@ -54,7 +60,7 @@
     const key = [zone, zoneH, menu.leftHanded, dpad].join("|");
     if (key === layoutKey) return;
     layoutKey = key;
-    canvas.height = BB.H + zoneH;
+    logicalH = BB.H + zoneH;
     canvas.style.aspectRatio = BB.W + " / " + (BB.H + zoneH);
     touch.setLayout(BBInput.layoutFor({ zone, zoneH, leftHanded: menu.leftHanded, dpad }));
   }
@@ -136,7 +142,7 @@
   // pointer position in canvas coordinates (the canvas is scaled by CSS)
   function canvasPoint(e) {
     const r = canvas.getBoundingClientRect();
-    return [(e.clientX - r.left) * (canvas.width / r.width), (e.clientY - r.top) * (canvas.height / r.height)];
+    return [(e.clientX - r.left) * (BB.W / r.width), (e.clientY - r.top) * (logicalH / r.height)];
   }
   // returns true when the click was used by a menu or the game-over screen
   function handleScreenClick(x, y) {
@@ -227,9 +233,10 @@
 
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min((now - last) / 1000, 0.05);
+    const rawDt = (now - last) / 1000, dt = Math.min(rawDt, 0.05);
     last = now;
     syncLayout();
+    hd.frame(rawDt); // resize / zoom / slow-frame step-down redo the backing store; also resets the scale
     const input = readInput();
     game.paused = menu.screen !== "playing";
     const livesBefore = game.lives;
