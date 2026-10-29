@@ -4,7 +4,7 @@
 (function (root) {
   const UI = root.BBUI, N = UI.NEON; // shared neon palette and type
   const W = 480, H = 640;
-  const HUD_H = 64; // two-row top bar
+  const HUD_H = 36; // one-row top bar: lives, score, mute, pause
   const CONTROLS_ALPHA = 0.7; // the floating buttons are see-through
   const NEBULA = [ // drifting colour clouds: x, y, radius, colour, drift speed
     { x: 0.2, y: 0.25, r: 190, c: "90,60,200", v: 6 }, { x: 0.8, y: 0.55, r: 220, c: "30,120,200", v: 4 },
@@ -13,10 +13,6 @@
   const SHOCK = { life: 0.45, radius: 46, bigRadius: 110 };
   const RANK_COLOR = { bronze: "#c8843c", silver: "#cfd6e0", gold: "#ffd23c" };
   const RANK_SPRITE = { bronze: "capsuleBronze", silver: "capsuleSilver", gold: "capsuleGold", rainbow: "capsuleRainbow" };
-  const SPECIES_COLOR = {
-    drone: "#f5a", wasp: "#5df", viper: "#f66", diver: "#6e6", splitter: "#c8f",
-    splitling: "#e88", orbiter: "#7af", dasher: "#f84",
-  };
   const SPRITE_SCALE = 1.35; // sprites are drawn a bit larger than their hitbox
   const FLASH_TIME = 0.35;
   const BLINK_HZ = 3; // blinks per second for a new high-score row
@@ -60,7 +56,19 @@
   const PULSE = { depth: 0.06, speed: 4 }; // gentle breathing of the title and the replay prompt
   const GOAL_ICON = { miniboss: "escort", kaboom: "boom", weapon: "weapon" };
 
+  // an offscreen canvas for the ship cache; null in Node, where ships draw straight to the target
+  function defaultMakeCanvas(w, h) {
+    const doc = root.document;
+    if (doc && typeof doc.createElement === "function") {
+      const c = doc.createElement("canvas");
+      c.width = w; c.height = h;
+      return c;
+    }
+    return typeof root.OffscreenCanvas === "function" ? new root.OffscreenCanvas(w, h) : null;
+  }
+
   // opts.reducedMotion: no pulses, no background drift, no screen shake
+  // opts.makeCanvas(w, h): offscreen canvas factory for the ship cache (default: document or OffscreenCanvas)
   function createRenderer(ctx, assets, opts) {
     let reducedMotion = !!(opts && opts.reducedMotion);
     const shake = { time: 0, max: SHAKE.time, mag: SHAKE.mag };
@@ -69,6 +77,9 @@
     const particles = [];
     const rings = []; // explosion shockwaves
     const ui = root.BBUI.createUI(ctx);
+    // without the assets script loaded (some tests) the ships are simply skipped
+    const shipArt = root.BBAssets
+      ? root.BBAssets.createShipArt((opts && opts.makeCanvas) || defaultMakeCanvas) : { draw() {} };
     const flash = { time: 0 };
     let prev = { drones: [], lives: null, wave: null, nukes: 0 };
     let scroll = 0;
@@ -306,7 +317,6 @@
     function drawEnemy(e) {
       const [cx, cy] = center(e);
       const w = e.w * (e.boss ? 1.1 : SPRITE_SCALE);
-      const color = SPECIES_COLOR[e.species] || SPECIES_COLOR.drone;
       const tinted = info && (info.world > 1 || info.loop > 0);
       if (tinted) { // each world tints its enemies: a halo everywhere, a hue shift where the canvas has filters
         ctx.save();
@@ -316,10 +326,7 @@
         ctx.save();
         if (typeof ctx.filter === "string") ctx.filter = "hue-rotate(" + (info.tint.hue + 25 * info.loop) + "deg)";
       }
-      sprite(e.species || "drone", cx, cy, w, () => {
-        ctx.fillStyle = color;
-        ctx.fillRect(e.x + 2, e.y + 2, e.w - 4, e.h - 4);
-      });
+      shipArt.draw(ctx, e.species || "drone", cx, cy, w);
       if (tinted) ctx.restore();
     }
 
@@ -407,15 +414,8 @@
       drawAura(game, cx, cy, t);
       drawEngineFlame(cx, s.y + s.h - 2, t, root.BBSkills.highestTier(game) >= root.BBSkills.ULTRA);
       sprite("flame", cx, s.y + s.h + 6, 9 * flicker, null);
-      const shipFallback = () => {
-        ctx.fillStyle = N.cyan;
-        ctx.beginPath();
-        ctx.moveTo(cx, s.y); ctx.lineTo(s.x + s.w, s.y + s.h); ctx.lineTo(cx, s.y + s.h - 6); ctx.lineTo(s.x, s.y + s.h);
-        ctx.closePath(); ctx.fill();
-      };
-      sprite("ship", cx, cy, s.w * 1.6, shipFallback);
-      const dmg = Math.min(3, 3 - game.lives);
-      if (dmg > 0) sprite("shipDamage" + dmg, cx, cy, s.w * 1.6, null);
+      const dmg = Math.max(0, Math.min(3, 3 - game.lives));
+      shipArt.draw(ctx, "player", cx, cy, s.w * 1.6, { dmg });
       if (game.superStar > 0) circle(cx, cy, 26, null, rainbow(t), 3);
       if (game.shield > 0) { // shield ring, fainter as it is used up
         ctx.globalAlpha = 0.4 + 0.2 * game.shield;
@@ -481,12 +481,7 @@
       if (!game.twin || game.status !== "playing") return;
       const r = B.twinRect(game), [cx, cy] = center(r);
       ctx.globalAlpha = game.twin.life < 3 && Math.floor(t * 8) % 2 === 0 ? 0.4 : 0.85; // blinks before it leaves
-      sprite("ship", cx, cy, r.w * 1.6, () => {
-        ctx.fillStyle = "#8ff";
-        ctx.beginPath();
-        ctx.moveTo(cx, r.y); ctx.lineTo(r.x + r.w, r.y + r.h); ctx.lineTo(cx, r.y + r.h - 6); ctx.lineTo(r.x, r.y + r.h);
-        ctx.closePath(); ctx.fill();
-      });
+      shipArt.draw(ctx, "player", cx, cy, r.w * 1.6);
       ctx.globalAlpha = 1;
     }
 
@@ -574,12 +569,6 @@
     }
 
     // ---- HUD ----
-    // an icon followed by a row of pips, filled up to `filled`
-    function iconBar(icon, x, y, max, filled, color) {
-      ui.icon(icon, x + 7, y, 16, color);
-      for (let i = 0; i < max; i++) circle(x + 22 + i * 10, y, 4, i < filled ? color : "rgba(255,255,255,0.2)");
-    }
-
     function drawBossBar(game) {
       const boss = game.drones.find((d) => d.boss && !d.entry && !(d.delay > 0));
       if (!boss) return;
@@ -613,15 +602,31 @@
       for (let i = 0; i < 5; i++) circle(x + i * gap, y, r, full || i < tier ? c : "rgba(255,255,255,0.2)");
     }
 
-    // HUD second row: owned skill families as small icons with tier pips
-    function drawSkillRow(game) {
+    // bottom HUD line: owned skill families as small icons with tier pips
+    function drawSkillRow(game, y) {
       const S = root.BBSkills;
       S.owned(game).forEach((f, i) => {
-        const x = 112 + i * 35, tier = S.tier(game, f.id);
+        const x = 62 + i * 33, tier = S.tier(game, f.id);
         const c = tier >= S.ULTRA ? N.red : tier >= S.MASTERED ? RANK_COLOR.gold : N.cyan;
-        ui.icon(f.icon, x + 12, 42, 11, c);
-        pips(x + 2, 55, tier, 5, 1.6, N.cyan);
+        ui.icon(f.icon, x + 5, y, 10, c);
+        pips(x + 13, y, tier, 3.6, 1.4, N.cyan);
       });
+    }
+
+    // wave, skill families, shield pips and BOOM charges on one line: under the controls zone in Below layout,
+    // along the bottom edge of the playfield in Overlay (the buttons end above it)
+    function bottomLineY(view) {
+      const layout = view.touch && view.touch.layout ? view.touch.layout() : null;
+      return layout && layout.zoneH ? H + layout.zoneH - root.BBInput.STRIP_H / 2 : H - 10;
+    }
+    function drawBottomLine(view) {
+      const { game } = view, R = root.BB.R(), y = bottomLineY(view);
+      text("WAVE " + game.wave, 8, y + 4, 12, "#fff");
+      drawSkillRow(game, y);
+      ui.icon("shield", 306, y, 12, RANK_COLOR.silver);
+      for (let i = 0; i < R.SHIELD.max; i++) circle(318 + i * 8, y, 2.6, i < game.shield ? RANK_COLOR.silver : "rgba(255,255,255,0.2)");
+      ui.icon("boom", 372, y, 12, N.yellow);
+      for (let i = 0; i < root.BB.KABOOM.maxCharges; i++) circle(386 + i * 9, y, 3, i < game.kaboomCharges ? N.yellow : "rgba(255,255,255,0.2)");
     }
 
     // the skill picker: seven cards, the game keeps running at 15 % behind it
@@ -632,9 +637,9 @@
       text(game.picks > 1 ? game.picks + " picks left" : "1 pick", W / 2, 118, 13, N.dim, "center");
       S.FAMILIES.forEach((f, i) => {
         const r = S.cardRect(i), tier = S.tier(game, f.id), maxed = tier >= S.MAX_TIER;
-        const selected = game.picker.cursor === i;
+        const locked = !game.picker.offered.includes(f.id), selected = game.picker.cursor === i && !locked;
         ctx.save();
-        if (maxed) ctx.globalAlpha = 0.35; // ULTRA-MAD families are greyed out
+        if (maxed || locked) ctx.globalAlpha = 0.35; // ULTRA-MAD and not-offered families are greyed out
         ui.panel(r.x, r.y, r.w, r.h, { stroke: selected && !maxed ? N.yellow : N.violet });
         ui.icon(f.icon, r.x + 20, r.y + 24, 14, maxed ? "#999" : N.cyan);
         text((i + 1) + "  " + f.name, r.x + 40, r.y + 29, 14, "#fff");
@@ -643,6 +648,7 @@
         if (badge) text(badge, r.x + r.w - 8, r.y + 54, 11, tier >= S.ULTRA ? N.red : RANK_COLOR.gold, "right");
         text(maxed ? "ULTRA-MAD" : "Next: " + S.nextText(f.id, tier), r.x + 12, r.y + 80, 11, maxed ? "#999" : N.dim);
         ctx.restore();
+        if (locked) text("LOCKED", r.x + r.w / 2, r.y + r.h / 2 + 5, 16, "#fff", "center");
       });
     }
 
@@ -650,23 +656,17 @@
       const { game } = view, t = view.time || 0;
       const R = root.BB.R(), IN = root.BBInput, P = IN.PAUSE_BUTTON;
       ui.panel(0, 0, W, HUD_H, { radius: 0, stroke: N.violet });
-      // row 1: lives, wave, best, pause
-      ui.icon("heart", 18, 15, 20, N.red);
-      text("×" + Math.max(0, game.lives), 32, 21, 16, "#fff");
-      text("WAVE " + game.wave, 130, 21, 15, "#fff", "center");
-      text("BEST " + (view.best || 0), 260, 21, 13, N.yellow, "center");
+      // one row: lives left, big score in the middle, mute and pause right
+      ui.icon("heart", 18, 18, 20, N.red);
+      text("×" + Math.max(0, game.lives), 32, 24, 16, "#fff");
+      text(String(game.score).padStart(6, "0"), W / 2, 27, 24, "#fff", "center");
       const paused = view.menu && view.menu.screen === "pause";
       ui.button(P.x, P.y, P.w, P.h, "", paused ? "pressed" : "idle");
       ui.icon("pause", P.x + P.w / 2, P.y + P.h / 2 + (paused ? 2 : 0), 16, "#fff");
       drawSpeaker(!!view.muted);
-      // row 2: score counter and the weapon / shield / escort bars
-      text("SCORE", 10, 43, 9, N.dim);
-      text(String(game.score).padStart(6, "0"), 10, 58, 18, "#fff");
-      drawSkillRow(game);
-      iconBar("shield", 362, 48, R.SHIELD.max, game.shield, RANK_COLOR.silver);
       if (game.superStar > 0) { // rainbow timer along the bottom edge of the bar
         ctx.fillStyle = rainbow(t);
-        ctx.fillRect(6, HUD_H - 6, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
+        ctx.fillRect(6, HUD_H - 5, (W - 12) * Math.min(1, game.superStar / R.SUPER_STAR.duration), 3);
       }
       drawBossBar(game);
     }
@@ -771,7 +771,7 @@
         ui.title("BOREDOM", W / 2, 150, 54);
         ui.title("BLASTER", W / 2, 215, 54, N.yellow);
       });
-      sprite("ship", W / 2, 268, 60, null);
+      shipArt.draw(ctx, "player", W / 2, 268, 60);
       const icons = ["play", "star", "weapon"];
       menu.titleItems().forEach((label, i) => menuButton(L, i, label, icons[i], i === menu.cursor));
       text("BEST " + (view.best || 0), W / 2, 500, 16, N.yellow, "center");
@@ -926,6 +926,7 @@
       ctx.restore();
       drawHud(view);
       drawControls(view);
+      drawBottomLine(view);
       if (card && game.status === "playing") drawCard();
       if (game.picker && game.status === "playing") drawPicker(game, t);
       const screen = view.menu && view.menu.screen;

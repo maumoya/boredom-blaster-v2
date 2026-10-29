@@ -23,10 +23,11 @@
     const flip = (o) => (swapped ? { ...o, x: W - o.x } : { ...o });
     const out = {};
     for (const name of Object.keys(EXTRA_BUTTONS)) {
-      out[name] = layout && layout.zoneH ? flip({ ...EXTRA_BELOW[name], y: H + layout.zoneH / 2 + EXTRA_BELOW[name].y }) : flip(EXTRA_BUTTONS[name]);
+      out[name] = layout && layout.zoneH ? flip({ ...EXTRA_BELOW[name], y: H + (layout.zoneH - STRIP_H) / 2 + EXTRA_BELOW[name].y }) : flip(EXTRA_BUTTONS[name]);
     }
     return out;
   }
+  const STRIP_H = 18; // the bottom HUD line (wave, skills, shield, BOOM) takes this much of the controls zone
   const TRAY_H = 0; // no tray: the buttons float over the playfield
   const PLAY_H = H;
   const PAUSE_BUTTON = { x: W - 44, y: 5, w: 38, h: 22 }; // in the top bar
@@ -57,13 +58,14 @@
   // Where the buttons (and the D-pad, when on) sit. opts: { zone, zoneH, leftHanded, dpad }
   function layoutFor(opts) {
     opts = opts || {};
-    const below = opts.zone === "below", zoneH = below ? opts.zoneH || ZONE_MIN : 0, cy = H + zoneH / 2;
+    const below = opts.zone === "below", zoneH = below ? opts.zoneH || ZONE_MIN : 0;
+    const half = (zoneH - STRIP_H) / 2, cy = H + half; // the controls centre above the HUD strip
     const flip = (o) => (opts.leftHanded ? { ...o, x: W - o.x } : { ...o });
     const buttons = {}, base = below
-      ? { fire: { x: 410, y: cy + 8, r: 42 }, special: { x: 326, y: cy - 14, r: 34 }, kaboom: { x: 264, y: cy + 22, r: 30 } }
+      ? { fire: { x: 410, y: cy + 6, r: 42 }, special: { x: 326, y: cy - 14, r: 34 }, kaboom: { x: 264, y: cy + 20, r: 30 } }
       : BUTTONS;
     for (const name of Object.keys(base)) buttons[name] = flip(base[name]);
-    const dpad = !opts.dpad ? null : flip(below ? { x: 100, y: cy, r: 64 } : { x: 92, y: 530, r: 56 });
+    const dpad = !opts.dpad ? null : flip(below ? { x: 100, y: cy, r: Math.min(64, Math.floor(half / HIT_SCALE)) } : { x: 92, y: 530, r: 56 });
     return { zone: below ? "below" : "overlay", zoneH, leftHanded: !!opts.leftHanded, buttons, dpad };
   }
 
@@ -667,7 +669,7 @@
     createHd, HD_MAX_RATIO, HD_STEPS, hdScale, backingSize, createQuality,
     STAR_WAVES, starsFor, createRunStats, TITLE_LAYOUT, SETTINGS_LAYOUT, SETTINGS_TOP_LAYOUT, GEAR, TITLE_ACTIONS, MAX_SCORES,
     toGamePoint, EXTRA_BUTTONS, EXTRA_KEYS, takeActions, extraButtons,
-    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll,
+    STICK, BUTTONS, TRAY_H, PLAY_H, PAUSE_BUTTON, pauseHit, STRIP_H, MENU_LAYOUT, createJoystick, createTouch, createMouse, createKeyboard, releaseAll,
     HIT_SCALE, ZONE_MIN_EXTRA, controlsZone, zoneHeightFor, layoutFor, dpadVector, createGamepad,
     createStore, createMenu, createInitialsPicker, INITIALS_LAYOUT, buttonAt, buttonsFor, mirrorButtons,
   };
