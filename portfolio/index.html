@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Boredom Blaster · Mauricio Alonso Moya Tapia</title>
+<meta name="description" content="Boredom Blaster: a browser space shooter for phone and desktop, built from scratch in plain JavaScript with a tamper-proof global high-score table.">
+<meta name="author" content="Mauricio Alonso Moya Tapia">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Boredom Blaster · a project by Mauricio Alonso Moya Tapia">
+<meta property="og:description" content="A browser space shooter for phone and desktop: five worlds, bosses, seven weapon families and a global high-score table that refuses fake scores.">
+<meta property="og:image" content="https://maumoya.github.io/boredom-blaster-v2/assets/brand/preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../assets/brand/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #e9f1ff; --dim: #9fb0cf; --faint: #5d6b8a;
+    --bg: #070914; --panel: #0f1428; --line: #222b4a;
+    --cyan: #3ff0ff; --yellow: #ffe24a; --orange: #ff8a2a; --magenta: #ff4fd8;
+    --display: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
+    --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body);
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(120, 60, 220, .28), transparent 60%),
+      radial-gradient(900px 500px at 0% 30%, rgba(30, 140, 220, .16), transparent 60%);
+    background-attachment: fixed;
+  }
+  .stars { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .7;
+    background-image:
+      radial-gradient(1px 1px at 12% 18%, #fff, transparent), radial-gradient(1px 1px at 72% 12%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 40% 64%, #cfe, transparent), radial-gradient(1px 1px at 88% 52%, #fff, transparent),
+      radial-gradient(1px 1px at 22% 86%, #fff, transparent), radial-gradient(1.5px 1.5px at 60% 34%, #fff, transparent),
+      radial-gradient(1px 1px at 5% 50%, #fff, transparent), radial-gradient(1px 1px at 94% 88%, #cfe, transparent);
+  }
+  main { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 0 20px 64px; }
+  a { color: var(--cyan); }
+  h1, h2, h3 { font-family: var(--display); line-height: 1.1; margin: 0; }
+  .eyebrow { font: 600 13px/1 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: center; padding: 72px 0 56px; }
+  .logo { font-size: clamp(52px, 8vw, 92px); font-weight: 700; margin: 14px 0 18px; }
+  .logo .a { color: var(--cyan); text-shadow: 0 0 24px rgba(63, 240, 255, .55); display: block; }
+  .logo .b { color: var(--yellow); text-shadow: 0 0 24px rgba(255, 226, 74, .45); display: block; }
+  .lede { font-size: 19px; color: var(--dim); max-width: 34em; margin: 0 0 28px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .cta { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; font: 700 18px/1 var(--display); letter-spacing: .04em;
+    text-decoration: none; padding: 16px 26px; border-radius: 14px; transition: transform .15s, box-shadow .15s; }
+  .btn.play { color: #1a0c00; background: linear-gradient(#ffb04a, var(--orange)); box-shadow: 0 0 0 2px #ffd36a inset, 0 8px 30px rgba(255, 138, 42, .35); }
+  .btn.ghost { color: var(--ink); border: 2px solid var(--cyan); box-shadow: 0 0 18px rgba(63, 240, 255, .2); }
+  .btn:hover { transform: translateY(-2px); }
+  .btn:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
+  .note { font-size: 14px; color: var(--faint); margin-top: 14px; }
+  .shot { border-radius: 22px; overflow: hidden; border: 1px solid var(--line); background: #000;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .6), 0 0 60px rgba(63, 240, 255, .12); }
+  .shot img { display: block; width: 100%; height: auto; }
+  .hero .shot { max-width: 420px; justify-self: center; transform: rotate(1.5deg); }
+
+  /* numbers */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line);
+    border: 1px solid var(--line); border-radius: 18px; overflow: hidden; margin: 8px 0 80px; }
+  .stat { background: var(--panel); padding: 24px 22px; }
+  .stat b { display: block; font: 700 38px/1 var(--display); color: var(--yellow); margin-bottom: 8px; }
+  .stat span { color: var(--dim); font-size: 15px; }
+
+  section { margin-bottom: 88px; }
+  section > h2 { font-size: clamp(30px, 4vw, 42px); margin: 10px 0 14px; }
+  section > p.sub { color: var(--dim); max-width: 46em; margin: 0 0 32px; }
+
+  /* cards */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
+  .card h3 { font-size: 21px; margin-bottom: 8px; }
+  .card p { margin: 0; color: var(--dim); font-size: 15.5px; }
+  .card .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 16px;
+    font: 700 20px/1 var(--display); }
+  .c1 .ico { background: rgba(63, 240, 255, .12); color: var(--cyan); }
+  .c2 .ico { background: rgba(255, 226, 74, .12); color: var(--yellow); }
+  .c3 .ico { background: rgba(255, 79, 216, .12); color: var(--magenta); }
+  .c4 .ico { background: rgba(255, 138, 42, .14); color: var(--orange); }
+
+  /* gallery */
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .gallery figure { margin: 0; }
+  .gallery figcaption { color: var(--dim); font-size: 14.5px; margin-top: 12px; }
+
+  /* engineering */
+  .eng { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .flow { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 24px; overflow-x: auto; }
+  .flow ol { margin: 0; padding-left: 22px; color: var(--dim); }
+  .flow li { margin: 8px 0; }
+  .flow li strong { color: var(--ink); }
+  code { font: 500 .9em/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--cyan); background: rgba(63, 240, 255, .08);
+    padding: 2px 6px; border-radius: 6px; }
+  .stack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .stack span { font-size: 13.5px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--dim); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 32px; color: var(--faint); font-size: 14.5px;
+    display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: space-between; }
+  footer strong { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding-top: 48px; gap: 36px; }
+    .hero .shot { max-width: 340px; transform: none; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .cards, .gallery, .eng { grid-template-columns: 1fr; }
+    .gallery .shot { max-width: 380px; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn { transition: none; } .btn:hover { transform: none; } }
+</style>
+</head>
+<body>
+<div class="stars" aria-hidden="true"></div>
+<main>
+
+  <header class="hero">
+    <div>
+      <div class="eyebrow">Game · Web · Phone and desktop</div>
+      <h1 class="logo"><span class="a">BOREDOM</span><span class="b">BLASTER</span></h1>
+      <p class="lede">A fast, neon <strong>space shooter</strong> that runs in any browser. Steer, power up, beat the bosses and climb a
+        <strong>global high-score table</strong> that cannot be faked. Free, no install, no sign-up.</p>
+      <div class="cta">
+        <a class="btn play" href="../">▶ PLAY NOW</a>
+        <a class="btn ghost" href="#how">HOW IT'S BUILT</a>
+      </div>
+      <p class="note">Works with touch, keyboard and game controllers.</p>
+    </div>
+    <div class="shot"><img src="img/play.jpg" width="628" height="900" alt="Wave 24: the ship fires seven streams of cyan bolts at a row of alien saucers while a mini-boss circles above."></div>
+  </header>
+
+  <div class="stats" role="list">
+    <div class="stat" role="listitem"><b>5</b><span>worlds, 100 waves each, then it loops harder</span></div>
+    <div class="stat" role="listitem"><b>7</b><span>weapon families, up to ULTRA-MAD</span></div>
+    <div class="stat" role="listitem"><b>338</b><span>automated tests</span></div>
+    <div class="stat" role="listitem"><b>$0</b><span>to host and run</span></div>
+  </div>
+
+  <section>
+    <div class="eyebrow">The game</div>
+    <h2>Easy to start, hard to put down</h2>
+    <p class="sub">Every wave brings new formations, and every few waves a choice of upgrade. Runs are short enough for a coffee break, and the next world is always one wave away.</p>
+    <div class="cards">
+      <div class="card c1"><div class="ico">✦</div><h3>Pick your build</h3><p>Seven upgrade families (more shots, faster shots, lasers, orbiting moons, a magnet and more), each climbing to MASTERED and ULTRA-MAD.</p></div>
+      <div class="card c2"><div class="ico">◎</div><h3>Bosses and worlds</h3><p>Five enemy types and two mini-bosses that fly curved entry paths, across five worlds with their own sky, colors and music.</p></div>
+      <div class="card c3"><div class="ico">★</div><h3>Play anywhere</h3><p>A thumb stick and buttons on the phone, a left-hand mode, keyboard keys you can remap, and controller support.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Screens</div>
+    <h2>In motion</h2>
+    <p class="sub">Real captures from the live game.</p>
+    <div class="gallery">
+      <figure><div class="shot"><img src="img/title.jpg" width="628" height="900" loading="lazy" alt="Title screen with the Boredom Blaster logo, the player ship and Start, High Scores and How to Play buttons."></div><figcaption>Title screen</figcaption></figure>
+      <figure><div class="shot"><img src="img/laser.jpg" width="628" height="900" loading="lazy" alt="Wave 46: a two-row saucer formation and drifting asteroids above the ship."></div><figcaption>Formations and asteroids</figcaption></figure>
+      <figure><div class="shot"><img src="img/frost.jpg" width="628" height="900" loading="lazy" alt="Wave 71: a mini-boss with a glowing core leads a row of saucers while the ship fires four-wide volleys."></div><figcaption>Mini-boss wave</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="eyebrow">Engineering</div>
+    <h2>How it's built</h2>
+    <p class="sub">Written from scratch in plain JavaScript and the HTML canvas, with no game engine or framework. Static hosting for the game, plus one tiny serverless function for the shared scores.</p>
+    <div class="eng">
+      <div class="card c4"><div class="ico">⚿</div><h3>A score table that refuses fakes</h3>
+        <p>Every run gets a signed ticket from the server (HMAC with the server's own clock). A score is only accepted with a valid, unused ticket, and only if its waves, play time and points fit the real time that passed. Hand-made or replayed requests are refused. Practice runs never post.</p></div>
+      <div class="card c1"><div class="ico">◉</div><h3>Privacy first</h3>
+        <p>No accounts, no cookies, no IDs. The only stats are anonymous counts of finished runs (wave, length, phone or desktop). Only three initials are ever kept with a score.</p></div>
+      <div class="flow">
+        <h3 style="font-size:21px;margin-bottom:10px">A run, end to end</h3>
+        <ol>
+          <li><strong>Start:</strong> the game asks the Worker for a ticket.</li>
+          <li><strong>Play:</strong> everything runs in the browser at 60 fps.</li>
+          <li><strong>Game over:</strong> initials, score and ticket go to the Worker.</li>
+          <li><strong>Check:</strong> signature, age, one-time use, rate limit and plausibility.</li>
+          <li><strong>Store:</strong> the top 10 is kept in Cloudflare KV.</li>
+        </ol>
+      </div>
+      <div class="card c2"><div class="ico">✓</div><h3>Tested and shipped safely</h3>
+        <p>338 automated tests cover game rules, upgrades, input, the score server and its anti-cheat checks. Each change is tested locally before it goes live, and the page always loads the newest version.</p>
+        <div class="stack"><span>JavaScript</span><span>HTML Canvas</span><span>Web Audio</span><span>Gamepad API</span><span>Cloudflare Workers</span><span>Workers KV</span><span>GitHub Pages</span><span>node:test</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="text-align:center">
+    <h2 style="font-size:clamp(28px,4vw,40px);margin-bottom:22px">Ready for a run?</h2>
+    <a class="btn play" href="../">▶ PLAY BOREDOM BLASTER</a>
+  </section>
+
+  <footer>
+    <div>Designed and developed by <strong>Mauricio Alonso Moya Tapia</strong> · October 2026 · All rights reserved.</div>
+    <div>Ship and enemy sprites: “Space Shooter Redux” by Kenney (kenney.nl), CC0.</div>
+  </footer>
+</main>
+</body>
+</html>
