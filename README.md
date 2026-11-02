@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/plays%20on-phone%20%C2%B7%20desktop%20%C2%B7%20controller-7c5cfc" alt="Plays on phone, desktop and game controllers">
   <img src="https://img.shields.io/badge/tests-338%20automated-2da44e" alt="338 automated tests">
   <img src="https://img.shields.io/badge/hosting-%240-2da44e" alt="Hosting cost: $0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/privacy-no%20accounts%20%C2%B7%20no%20cookies-7c5cfc" alt="Privacy: no accounts, no cookies">
   <img src="https://img.shields.io/badge/scores-anti--cheat%20signed%20tickets-f38020?logo=cloudflare&logoColor=white" alt="Global scores with anti-cheat signed tickets on Cloudflare Workers">
 </p>
@@ -54,10 +55,15 @@ The full write-up, with screens and the score flow end to end, is on the [portfo
 
 This is the published build. `tools/publish.sh` copies the game from its source repository,
 regenerates `index.html` and `version.json`, and pushes; GitHub Pages serves the result.
+It also carries the tests (`test/`, run with `node --test`) and the scores Worker (`worker/`).
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Credits
 
-Designed and developed by **Mauricio Alonso Moya Tapia** ([@maumoya](https://github.com/maumoya)). © 2026. All rights reserved.
+Designed and developed by **Mauricio Alonso Moya Tapia** ([@maumoya](https://github.com/maumoya)). Released under the [MIT License](LICENSE).
 More of my work on [GitHub](https://github.com/maumoya); say hi on [LinkedIn](https://www.linkedin.com/in/mba-mmoyat/).
 
 Ship and enemy sprites: "Space Shooter Redux" by Kenney ([kenney.nl](https://www.kenney.nl)), CC0.
