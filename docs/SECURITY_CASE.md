@@ -24,7 +24,7 @@
 - **Evidence.** 338 automated tests (`node --test`, about 95% line coverage) include the Worker's checks; CodeQL
   security-and-quality runs on every PR; OpenSSF Scorecard runs weekly.
 
-## Known limitation
+## Secret comparisons
 
-The owner-only `/stats` endpoint compares the bearer key with a plain string comparison, not a constant-time one.
-It reads anonymous totals only, the key is 192 bits, and requests are network-timed, so the risk is low; it is tracked for a fix.
+The `/stats` bearer key and run-ticket signatures are compared through SHA-256 digests without stopping at
+the first difference (`sameText` in `worker/scores.js`), so response time does not reveal how much of a secret matched.
