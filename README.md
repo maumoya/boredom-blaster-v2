@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://maumoya.github.io/boredom-blaster-v2/"><img src="assets/brand/preview.jpg" alt="Boredom Blaster: a free neon space shooter you play in the browser, with world bosses, power-ups and global scores" width="100%"></a>
+  <a href="https://maumoya.github.io/boredom-blaster-v2/"><img src="assets/brand/header/header.png" alt="Boredom Blaster: a free neon space shooter you play in the browser, with world bosses, power-ups and global scores" width="100%"></a>
 </p>
 
 <p align="center">
@@ -57,6 +57,7 @@ regenerates `index.html` and `version.json`, and pushes; GitHub Pages serves the
 
 ## Credits
 
-Designed and developed by **Mauricio Alonso Moya Tapia**. © 2026. All rights reserved.
+Designed and developed by **Mauricio Alonso Moya Tapia** ([@maumoya](https://github.com/maumoya)). © 2026. All rights reserved.
+More of my work on [GitHub](https://github.com/maumoya); say hi on [LinkedIn](https://www.linkedin.com/in/mba-mmoyat/).
 
 Ship and enemy sprites: "Space Shooter Redux" by Kenney ([kenney.nl](https://www.kenney.nl)), CC0.
