@@ -14,6 +14,9 @@ test("game.js HTML-escapes its own script URL before document.write", async () =
   for (const w of writes) {
     assert.ok(!w.includes('"><img'), w);
     assert.ok(w.includes("&quot;&gt;&lt;img"), w);
-    assert.match(w, /^<script src="[^"<>]*"><\/script>$/);
+    const head = '<script src="', tail = '"></script>';
+    assert.ok(w.startsWith(head) && w.endsWith(tail), w);
+    const url = w.slice(head.length, -tail.length);
+    for (const c of ['"', "<", ">"]) assert.ok(!url.includes(c), w);
   }
 });
