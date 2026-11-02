@@ -8,7 +8,6 @@ import "../src/game.js";
 const BB = globalThis.BB;
 const RW = globalThis.BBRewards;
 const drone = (x, y) => ({ x, y, w: BB.DRONE.w, h: BB.DRONE.h });
-const onShip = (g) => ({ x: g.ship.x, y: g.ship.y });
 
 // a game with one far-away drone so waves do not roll over and nothing touches the ship
 function quietGame() {
