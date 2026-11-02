@@ -17,6 +17,8 @@ for f in $(git -C "$G" ls-tree --name-only main src/); do git -C "$G" show "main
 rm -rf "$T/assets" && git -C "$G" archive main assets | tar -x -C "$T"
 # the portfolio page about the game, served at <site>/portfolio/
 rm -rf "$T/portfolio" && git -C "$G" archive main portfolio | tar -x -C "$T"
+# the tests and the scores Worker, so CI can run the tests on the published build
+rm -rf "$T/test" "$T/worker" && git -C "$G" archive main test worker package.json | tar -x -C "$T"
 printf '{"v":"%s","scripts":[%s]}\n' "$V" "$JSON" > "$T/version.json"
 
 # link preview (iMessage, WhatsApp, Slack); the image and the icons ship with the game in assets/brand/

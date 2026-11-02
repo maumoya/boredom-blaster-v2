@@ -1,0 +1,8 @@
+{
+  "name": "boredom-blaster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A retro space shooter for the Mac. Owner and author: Mauricio Alonso Moya Tapia.",
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
