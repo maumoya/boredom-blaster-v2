@@ -19,5 +19,5 @@ A change lands only through a pull request with green CI (tests and CodeQL) and 
 
 [@mdc-tdm](https://github.com/mdc-tdm) is the designated successor and holds write access to this repository.
 If the maintainer becomes unavailable, the successor can triage issues, merge pull requests and publish
-the game within a week, and receives the maintainer's GitHub and Cloudflare access through emergency access.
+the game within a week. The shared-scores Worker keeps running on its own; changing it needs the maintainer's Cloudflare account.
 Without any maintainer, the game keeps running as a static site on GitHub Pages, and anyone can fork it under the MIT License.
