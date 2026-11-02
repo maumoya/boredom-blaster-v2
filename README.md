@@ -16,6 +16,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/privacy-no%20accounts%20%C2%B7%20no%20cookies-7c5cfc" alt="Privacy: no accounts, no cookies">
   <img src="https://img.shields.io/badge/scores-anti--cheat%20signed%20tickets-f38020?logo=cloudflare&logoColor=white" alt="Global scores with anti-cheat signed tickets on Cloudflare Workers">
+  <br>
+  <a href="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/test.yml"><img src="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/codeql.yml"><img src="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/maumoya/boredom-blaster-v2"><img src="https://api.scorecard.dev/projects/github.com/maumoya/boredom-blaster-v2/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://www.bestpractices.dev/projects/16185"><img src="https://www.bestpractices.dev/projects/16185/badge" alt="OpenSSF Best Practices"></a>
 </p>
 
 # Boredom Blaster
