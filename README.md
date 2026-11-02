@@ -64,7 +64,7 @@ It also carries the tests (`test/`, run with `node --test`) and the scores Worke
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); the security requirements are in [docs/SECURITY_CASE.md](docs/SECURITY_CASE.md).
 
 ## Credits
 
