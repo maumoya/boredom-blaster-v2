@@ -65,6 +65,17 @@ async function allowSubmit(request, env, now, prefix = "rl:", limit = LIMIT) {
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
+// true when a and b are the same string; compares SHA-256 digests byte by byte without stopping early,
+// so the time taken does not leak how much of a secret matched
+export async function sameText(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const digest = (s) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)).then((d) => new Uint8Array(d));
+  const [x, y] = await Promise.all([digest(a), digest(b)]);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
 // HMAC-SHA256 of "run:<t>" with the owner's STATS_KEY secret; null when the Worker has no secret
 async function sign(env, t) {
   if (!env.STATS_KEY) return null;
@@ -79,7 +90,7 @@ async function ticketSeconds(env, ticket, now) {
   const m = /^(\d{13})\.([A-Za-z0-9_-]{27})$/.exec(typeof ticket === "string" ? ticket : "");
   if (!m) return null;
   const t = Number(m[1]), want = await sign(env, t);
-  if (!want || want !== m[2] || t > now) return null;
+  if (!want || t > now || !(await sameText(m[2], want))) return null;
   const elapsed = (now - t) / 1000;
   return elapsed <= TICKET_MAX_SECONDS ? elapsed : null;
 }
@@ -179,7 +190,7 @@ async function event(request, env, now, cors) {
 
 async function stats(request, env, now) {
   const want = env.STATS_KEY ? "Bearer " + env.STATS_KEY : null;
-  if (!want || request.headers.get("Authorization") !== want) return json({ error: "forbidden" }, 403, {});
+  if (!want || !(await sameText(request.headers.get("Authorization") ?? "", want))) return json({ error: "forbidden" }, 403, {});
   const n = Math.min(400, Math.max(1, parseInt(new URL(request.url).searchParams.get("days"), 10) || 30));
   const days = [];
   for (let i = 0; i < n; i++) {
