@@ -526,9 +526,13 @@
 })(globalThis);
 
 // index.html does not list enemies.js: pull it in right behind game.js, before main.js runs.
+// The URL is HTML-escaped so a crafted script URL cannot break out of the src attribute.
+function bbEscapeAttr(s) {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 if (!globalThis.BBEnemies && typeof document !== "undefined" && document.currentScript) {
-  document.write('<script src="' + document.currentScript.src.replace(/game\.js(\?.*)?$/, "enemies.js") + '"><\/script>');
+  document.write('<script src="' + bbEscapeAttr(document.currentScript.src.replace(/game\.js(\?.*)?$/, "enemies.js")) + '"><\/script>');
 }
 if (!globalThis.BBSkills && typeof document !== "undefined" && document.currentScript) {
-  document.write('<script src="' + document.currentScript.src.replace(/game\.js(\?.*)?$/, "skills.js") + '"><\/script>');
+  document.write('<script src="' + bbEscapeAttr(document.currentScript.src.replace(/game\.js(\?.*)?$/, "skills.js")) + '"><\/script>');
 }
