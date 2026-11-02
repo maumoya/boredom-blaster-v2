@@ -14,7 +14,10 @@ LIST=$( { echo src/rewards.js; echo "$SELF"; git -C "$G" show main:index.html | 
 JSON=$(echo "$LIST" | sed 's/.*/"&"/' | paste -sd, -)
 
 for f in $(git -C "$G" ls-tree --name-only main src/); do git -C "$G" show "main:$f" > "$T/$f"; done
+# the README header (assets/brand/header) exists only here, not in the game repo, so keep it across the refresh
+H="$(mktemp -d)" && cp -R "$T/assets/brand/header" "$H/"
 rm -rf "$T/assets" && git -C "$G" archive main assets | tar -x -C "$T"
+mkdir -p "$T/assets/brand" && cp -R "$H/header" "$T/assets/brand/" && rm -rf "$H"
 # the portfolio page about the game, served at <site>/portfolio/
 rm -rf "$T/portfolio" && git -C "$G" archive main portfolio | tar -x -C "$T"
 # the tests and the scores Worker, so CI can run the tests on the published build
