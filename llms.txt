@@ -1,0 +1,21 @@
+# Boredom Blaster
+
+> A free, fast, neon space shooter that runs in any browser: five worlds, bosses, power-ups and a global
+> high-score table protected by signed tickets. Plain JavaScript and HTML canvas, no engine, no accounts,
+> no cookies. MIT licensed. Owner and author: Mauricio Alonso Moya Tapia.
+
+- Play: https://maumoya.github.io/boredom-blaster-v2/
+- How it is built: https://maumoya.github.io/boredom-blaster-v2/portfolio/
+
+## Docs
+
+- [README](https://github.com/maumoya/boredom-blaster-v2/blob/main/README.md): what the game is, results, how it is built
+- [Architecture](https://github.com/maumoya/boredom-blaster-v2/blob/main/docs/ARCHITECTURE.md): game loop, loader and the scores Worker
+- [Security case](https://github.com/maumoya/boredom-blaster-v2/blob/main/docs/SECURITY_CASE.md): threats and the anti-cheat score checks
+- [Changelog](https://github.com/maumoya/boredom-blaster-v2/blob/main/CHANGELOG.md): releases and measured numbers
+
+## Optional
+
+- [Roadmap](https://github.com/maumoya/boredom-blaster-v2/blob/main/ROADMAP.md)
+- [Contributing](https://github.com/maumoya/boredom-blaster-v2/blob/main/CONTRIBUTING.md)
+- [Security policy](https://github.com/maumoya/boredom-blaster-v2/blob/main/SECURITY.md)
