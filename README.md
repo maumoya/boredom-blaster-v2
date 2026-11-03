@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/plain%20JavaScript-no%20engine-f7df1e?logo=javascript&logoColor=black" alt="Plain JavaScript, no game engine">
   <img src="https://img.shields.io/badge/HTML-canvas-e34f26?logo=html5&logoColor=white" alt="HTML canvas">
   <img src="https://img.shields.io/badge/plays%20on-phone%20%C2%B7%20desktop%20%C2%B7%20controller-7c5cfc" alt="Plays on phone, desktop and game controllers">
-  <img src="https://img.shields.io/badge/tests-338%20automated-2da44e" alt="338 automated tests">
+  <img src="https://img.shields.io/badge/tests-340%20automated-2da44e" alt="340 automated tests">
   <img src="https://img.shields.io/badge/hosting-%240-2da44e" alt="Hosting cost: $0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/privacy-no%20accounts%20%C2%B7%20no%20cookies-7c5cfc" alt="Privacy: no accounts, no cookies">
@@ -21,6 +21,7 @@
   <a href="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/codeql.yml"><img src="https://github.com/maumoya/boredom-blaster-v2/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/maumoya/boredom-blaster-v2"><img src="https://api.scorecard.dev/projects/github.com/maumoya/boredom-blaster-v2/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://www.bestpractices.dev/projects/16185"><img src="https://www.bestpractices.dev/projects/16185/badge" alt="OpenSSF Best Practices"></a>
+  <a href="https://github.com/maumoya/boredom-blaster-v2/releases/latest"><img src="https://img.shields.io/github/v/release/maumoya/boredom-blaster-v2" alt="Latest release"></a>
 </p>
 
 # Boredom Blaster
@@ -34,7 +35,7 @@ global high-score table that cannot be faked. Free, no install, no sign-up.
   <img src="portfolio/img/frost.jpg" alt="Wave 71: a mini-boss with a glowing core leads a row of saucers while the ship fires four-wide volleys" width="32%">
 </p>
 
-| 5 worlds | 7 weapon families | 338 tests | $0 |
+| 5 worlds | 7 weapon families | 340 tests | $0 |
 |:---:|:---:|:---:|:---:|
 | 100 waves each, then it loops harder | up to ULTRA-MAD | game rules, input, score server, anti-cheat | to host and run |
 
@@ -62,13 +63,30 @@ This is the published build. `tools/publish.sh` copies the game from its source 
 regenerates `index.html` and `version.json`, and pushes; GitHub Pages serves the result.
 It also carries the tests (`test/`, run with `node --test`) and the scores Worker (`worker/`).
 
+## Results
+
+Measured on 2026-11-03 against `main` at `f15218c` (release v2.1.0), Node 24, macOS. Repeat it with the command below.
+
+| Check | Result |
+|---|---|
+| Automated tests (`node --test`) | **340 / 340 pass**, 0 fail, 0.39 s |
+| Live site serves this build | site `version.json` = game commit `abaab50`, same as `main` |
+| OpenSSF Scorecard | **7.2 / 10** (scan of 2026-11-02) |
+| OpenSSF Best Practices | **Silver** |
+
+```bash
+git clone https://github.com/maumoya/boredom-blaster-v2 && cd boredom-blaster-v2 && node --test
+```
+
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md), [ROADMAP.md](ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); the security requirements are in [docs/SECURITY_CASE.md](docs/SECURITY_CASE.md).
 
-## Credits
+## About the author
 
 Designed and developed by **Mauricio Alonso Moya Tapia** ([@maumoya](https://github.com/maumoya)). Released under the [MIT License](LICENSE).
 More of my work on [GitHub](https://github.com/maumoya); say hi on [LinkedIn](https://www.linkedin.com/in/mba-mmoyat/).
+
+## Credits
 
 Ship and enemy sprites: "Space Shooter Redux" by Kenney ([kenney.nl](https://www.kenney.nl)), CC0.
