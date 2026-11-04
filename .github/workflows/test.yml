@@ -26,5 +26,5 @@ jobs:
         run: |
           python3 -I tools/sync.py check . --no-outward
           want=$(python3 -I -c 'import json;print(json.load(open("launch/facts.json"))["tests"]["value"])')
-          got=$(node --test 2>&1 | sed -n 's/^ℹ pass //p')
+          got=$(node --test --test-reporter=tap 2>&1 | sed -n 's/^# pass //p')
           test "$got" = "$want" || { echo "$got tests pass, README says $want: update launch/facts.json"; exit 1; }
