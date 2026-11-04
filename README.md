@@ -24,6 +24,10 @@
   <a href="https://github.com/maumoya/boredom-blaster-v2/releases/latest"><img src="https://img.shields.io/github/v/release/maumoya/boredom-blaster-v2" alt="Latest release"></a>
 </p>
 
+<p align="center">
+  <img src="docs/demo.gif" width="300" alt="Boredom Blaster v2 gameplay: a fully upgraded ship moving in all directions, then a new record and the top-10 table.">
+</p>
+
 # Boredom Blaster
 
 **A fast, neon space shooter that runs in any browser.** Steer, power up, beat the bosses and climb a
