@@ -67,12 +67,14 @@ It also carries the tests (`test/`, run with `node --test`) and the scores Worke
 
 Measured on 2026-11-03 against `main` at `f15218c` (release v2.1.0), Node 24, macOS. Repeat it with the command below.
 
+<img src="docs/tests-card.svg" align="right" width="220" alt="340 automated tests pass; OpenSSF Scorecard 7.2 of 10; Best Practices Silver">
+
 | Check | Result |
 |---|---|
-| Automated tests (`node --test`) | **340 / 340 pass**, 0 fail, 0.39 s |
+| Automated tests (`node --test`) | **<!--fact:tests-->340<!--/fact--> / <!--fact:tests-->340<!--/fact--> pass**, 0 fail, 0.39 s |
 | Live site serves this build | site `version.json` = game commit `abaab50`, same as `main` |
-| OpenSSF Scorecard | **7.2 / 10** (scan of 2026-11-02) |
-| OpenSSF Best Practices | **Silver** |
+| OpenSSF Scorecard | **<!--fact:scorecard-->7.2<!--/fact--> / 10** (scan of 2026-11-03) |
+| OpenSSF Best Practices | **<!--fact:best_practices-->Silver<!--/fact-->** |
 
 ```bash
 git clone https://github.com/maumoya/boredom-blaster-v2 && cd boredom-blaster-v2 && node --test

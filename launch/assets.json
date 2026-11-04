@@ -1,0 +1,3 @@
+[
+ {"path": "docs/tests-card.svg", "template": "launch/templates/tests-card.svg", "uses": ["tests", "scorecard", "best_practices"]}
+]
