@@ -1,0 +1,11 @@
+{
+ "assets": {
+  "assets/cards/tests-card.svg": "e8b1d0f6edbb",
+  "docs/tests-card.svg": "e8b1d0f6edbb"
+ },
+ "facts": {
+  "best_practices": "Silver",
+  "scorecard": "7.2",
+  "tests": "340"
+ }
+}
