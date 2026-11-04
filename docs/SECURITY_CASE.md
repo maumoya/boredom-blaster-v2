@@ -21,7 +21,7 @@
   complete mediation (every write needs a fresh, verified ticket).
 - **Common weaknesses countered.** Injection and XSS (no HTML from data, escaped script URL), forgery and replay
   (signed, single-use, time-bound tickets), resource exhaustion (body size and rate limits), secret leakage (secrets only in the runtime).
-- **Evidence.** 340 automated tests (`node --test`, about 95% line coverage) include the Worker's checks; CodeQL
+- **Evidence.** <!--fact:tests-->340<!--/fact--> automated tests (`node --test`, about 95% line coverage) include the Worker's checks; CodeQL
   security-and-quality runs on every PR; OpenSSF Scorecard runs weekly.
 
 ## Secret comparisons
